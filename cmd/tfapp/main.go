@@ -7,18 +7,22 @@ import (
 )
 
 func main() {
-	// Create the terraform apply command
-	cmd := exec.Command("terraform", "apply")
-	
+	tmpPlanFile := fmt.Sprintf("/tmp/tfplan.%d", os.Getpid())
+	// Create the base command with the required arguments
+	args := []string{"plan", "-out", tmpPlanFile}
+	// Append any additional arguments passed to our program
+	args = append(args, os.Args[1:]...)
+	tfplan := exec.Command("terraform", args...)
+
 	// Set the command to use the current terminal's stdin, stdout, and stderr
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	
+	tfplan.Stdin = os.Stdin
+	tfplan.Stdout = os.Stdout
+	tfplan.Stderr = os.Stderr
+
 	// Execute the command
-	err := cmd.Run()
+	err := tfplan.Run()
 	if err != nil {
 		fmt.Printf("Error executing terraform apply: %v\n", err)
 		os.Exit(1)
 	}
-} 
+}
