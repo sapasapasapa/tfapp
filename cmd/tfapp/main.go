@@ -101,6 +101,36 @@ func tfapply(tmpPlanFile string) {
 	}
 }
 
+func tfshow(tmpPlanFile string) {
+	tfshow := exec.Command("terraform", "show", "-no-color", tmpPlanFile)
+	tfshow.Stderr = os.Stderr
+	output, err := tfshow.Output()
+	if err != nil {
+		fmt.Printf("Error showing plan: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(string(output))
+}
+
+func menu(tmpPlanFile string) {
+	action, err := ShowMenu()
+	if err != nil {
+		fmt.Printf("Error showing menu: %v\n", err)
+		os.Exit(1)
+	}
+
+	switch action {
+	case "Apply":
+		tfapply(tmpPlanFile)
+		return
+	case "Show Full Plan":
+		tfshow(tmpPlanFile)
+		menu(tmpPlanFile)
+		return
+	}
+}
+
 func main() {
 	skipInit := flag.Bool("skip-init", false, "Skip terraform init")
 	flag.Parse()
@@ -112,5 +142,5 @@ func main() {
 	defer os.Remove(tmpPlanFile)
 
 	tfplan(tmpPlanFile, args)
-	tfapply(tmpPlanFile)
+	menu(tmpPlanFile)
 }
