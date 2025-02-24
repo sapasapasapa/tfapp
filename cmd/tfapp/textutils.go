@@ -7,6 +7,7 @@ const (
 	colorGreen  = "\033[32m"
 	colorYellow = "\033[33m"
 	colorReset  = "\033[0m"
+	textBold    = "\033[1m"
 )
 
 // colorize adds ANSI color codes to terraform plan output
