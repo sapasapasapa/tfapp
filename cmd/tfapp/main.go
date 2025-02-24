@@ -12,7 +12,7 @@ import (
 
 func tfinit(skip bool) {
 	if skip {
-		fmt.Printf("%s%sSkipping terraform init%s\n", colorYellow, textBold, colorReset)
+		fmt.Printf("%sTerraform init has been skipped.%s\n", colorYellow, colorReset)
 		return
 	}
 

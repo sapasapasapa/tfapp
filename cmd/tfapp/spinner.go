@@ -42,5 +42,5 @@ func (s *Spinner) Start() {
 // Stop ends the spinner animation
 func (s *Spinner) Stop() {
 	s.done <- true
-	fmt.Printf("\r%s", strings.Repeat(" ", len(s.message)+2)) // Clear the line
+	fmt.Printf("\r%s\r", strings.Repeat(" ", len(s.message)+2)) // Clear the line and reset cursor
 }
