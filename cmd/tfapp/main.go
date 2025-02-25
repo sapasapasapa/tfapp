@@ -135,6 +135,9 @@ func menu(tmpPlanFile string) {
 		tfshow(tmpPlanFile)
 		menu(tmpPlanFile)
 		return
+	case "Exit":
+		fmt.Printf("%sCommand aborted.%s\n", colorYellow, colorReset)
+		os.Exit(0)
 	}
 }
 

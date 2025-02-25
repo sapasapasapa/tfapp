@@ -2,45 +2,95 @@ package main
 
 import (
 	"fmt"
-	"strings"
+	"os"
 	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
-// Spinner represents a loading animation
-type Spinner struct {
-	message string
-	done    chan bool
-	frames  []string
+var (
+	// Available spinners
+	spinners = []spinner.Spinner{
+		spinner.MiniDot,
+	}
+	textStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	spinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8239F3"))
+)
+
+// quitMsg is sent when the spinner should stop
+type quitMsg struct{}
+
+// spinnerModel represents the spinner state
+type spinnerModel struct {
+	spinner  spinner.Model
+	message  string
+	quitting bool
+	err      error
+	program  *tea.Program
 }
 
-// NewSpinner creates a new spinner with the given message
-func NewSpinner(message string) *Spinner {
-	return &Spinner{
+// NewSpinner creates a new bubbletea-based spinner
+func NewSpinner(message string) *spinnerModel {
+	s := spinner.New()
+	s.Spinner = spinners[0] // MiniDot spinner
+	s.Style = spinnerStyle
+
+	return &spinnerModel{
+		spinner: s,
 		message: message,
-		done:    make(chan bool),
-		frames:  []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
 	}
 }
 
+// Init implements tea.Model
+func (m spinnerModel) Init() tea.Cmd {
+	return m.spinner.Tick
+}
+
+// Update implements tea.Model
+func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			m.quitting = true
+			return m, tea.Quit
+		}
+	case quitMsg:
+		m.quitting = true
+		return m, tea.Quit
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+// View implements tea.Model
+func (m spinnerModel) View() string {
+	if m.quitting {
+		return ""
+	}
+	return fmt.Sprintf("%s %s", m.spinner.View(), textStyle.Render(m.message))
+}
+
 // Start begins the spinner animation
-func (s *Spinner) Start() {
+func (m *spinnerModel) Start() {
+	p := tea.NewProgram(m, tea.WithoutCatchPanics())
+	m.program = p
 	go func() {
-		for {
-			for _, frame := range s.frames {
-				select {
-				case <-s.done:
-					return
-				default:
-					fmt.Printf("\r%s %s", frame, s.message)
-					time.Sleep(100 * time.Millisecond)
-				}
-			}
+		if _, err := p.Run(); err != nil {
+			fmt.Printf("Error running spinner: %v\n", err)
+			os.Exit(1)
 		}
 	}()
 }
 
 // Stop ends the spinner animation
-func (s *Spinner) Stop() {
-	s.done <- true
-	fmt.Printf("\r%s\r", strings.Repeat(" ", len(s.message)+2)) // Clear the line and reset cursor
+func (m *spinnerModel) Stop() {
+	if m.program != nil {
+		m.program.Send(quitMsg{})
+		time.Sleep(100 * time.Millisecond) // Give a short time for cleanup
+	}
 }
