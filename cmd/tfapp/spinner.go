@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -29,6 +30,8 @@ type spinnerModel struct {
 	quitting bool
 	err      error
 	program  *tea.Program
+	done     chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewSpinner creates a new bubbletea-based spinner
@@ -40,6 +43,7 @@ func NewSpinner(message string) *spinnerModel {
 	return &spinnerModel{
 		spinner: s,
 		message: message,
+		done:    make(chan struct{}),
 	}
 }
 
@@ -77,13 +81,20 @@ func (m spinnerModel) View() string {
 
 // Start begins the spinner animation
 func (m *spinnerModel) Start() {
-	p := tea.NewProgram(m, tea.WithoutCatchPanics())
+	m.wg.Add(1)
+	p := tea.NewProgram(m,
+		tea.WithoutCatchPanics(),
+		tea.WithMouseCellMotion(),
+	)
 	m.program = p
+
 	go func() {
+		defer m.wg.Done()
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("Error running spinner: %v\n", err)
 			os.Exit(1)
 		}
+		close(m.done)
 	}()
 }
 
@@ -91,6 +102,20 @@ func (m *spinnerModel) Start() {
 func (m *spinnerModel) Stop() {
 	if m.program != nil {
 		m.program.Send(quitMsg{})
-		time.Sleep(100 * time.Millisecond) // Give a short time for cleanup
+
+		// Wait for cleanup with timeout
+		cleanup := make(chan struct{})
+		go func() {
+			m.wg.Wait()
+			close(cleanup)
+		}()
+
+		select {
+		case <-cleanup:
+			// Normal cleanup completed
+		case <-time.After(500 * time.Millisecond):
+			// Timeout - force quit
+			fmt.Print("\r") // Clear the spinner line
+		}
 	}
 }
