@@ -45,7 +45,7 @@ func ShowMenu() (string, error) {
 		Size:     3,
 		Templates: &promptui.SelectTemplates{
 			Label:    "{{ . }}",
-			Active:   "> {{ .Name | cyan }} ({{ .Description | faint }})",
+			Active:   "> {{ .Name | cyan }} - {{ .Description }}",
 			Inactive: "  {{ .Name | faint }}",
 			Selected: "{{ .Selected | green }}",
 		},
