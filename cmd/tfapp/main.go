@@ -59,9 +59,10 @@ func tfinit(performInit bool, performUpgrade bool) {
 	}
 }
 
-func tfplan(tmpPlanFile string, args []string) {
+func tfplan(tmpPlanFile string, args []string) []string {
 	planArgs := []string{"plan", "-out", tmpPlanFile}
 	planArgs = append(planArgs, args...)
+	resources := []string{}
 
 	if err := runTerraformCommand(planArgs, "Creating terraform plan", false); err != nil {
 		fmt.Printf("%sError executing terraform plan: \n%v\n", colorRed, err)
@@ -81,11 +82,16 @@ func tfplan(tmpPlanFile string, args []string) {
 
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "# module.") || strings.HasPrefix(line, "Plan: ") {
+		if strings.Contains(line, "# module.") {
+			resources = append(resources, line)
+			colorizedLine := colorize(line)
+			fmt.Println(colorizedLine)
+		} else if strings.Contains(line, "Plan:") {
 			fmt.Println(colorize(line))
 		}
 	}
 	fmt.Println()
+	return resources
 }
 
 func tfapply(tmpPlanFile string) {
@@ -120,7 +126,53 @@ func tfshow(tmpPlanFile string) {
 	fmt.Println(string(output))
 }
 
-func menu(tmpPlanFile string) {
+func getResourceAction(line string) string {
+	if strings.Contains(line, "will be created") {
+		return "create"
+	} else if strings.Contains(line, "will be destroyed") {
+		return "destroy"
+	} else if strings.Contains(line, "will be updated in-place") {
+		return "update"
+	}
+	return ""
+}
+
+func tftargetapply(resources []string) []string {
+	clearTerminal()
+
+	// Example resources - these should be replaced with actual resources from your Terraform plan
+	checkboxOptions := []CheckboxMenuOption{}
+	for _, resource := range resources {
+		action := getResourceAction(resource)
+		// Clean up the name by removing leading # and whitespace
+		name := strings.TrimPrefix(strings.TrimSpace(strings.Split(resource, " will be")[0]), "#")
+		checkboxOptions = append(checkboxOptions, CheckboxMenuOption{
+			Name:        name,
+			Description: action,
+		})
+	}
+
+	selected, err := ShowCheckboxMenu(checkboxOptions)
+	if err != nil {
+		fmt.Printf("%sError showing checkbox menu: \n%v\n", colorRed, err)
+		os.Exit(1)
+	}
+
+	if len(selected) == 0 {
+		fmt.Printf("%sNo resources selected for targeted apply.%s\n", colorYellow, colorReset)
+		os.Exit(0)
+	}
+
+	// Create target arguments for selected resources
+	var targetArgs []string
+	for _, opt := range selected {
+		targetArgs = append(targetArgs, "-target="+opt.Name)
+	}
+
+	return targetArgs
+}
+
+func menu(tmpPlanFile string, resources []string, args []string) {
 	action, err := ShowMenu()
 	if err != nil {
 		fmt.Printf("%sError showing menu: \n%v\n", colorRed, err)
@@ -128,27 +180,42 @@ func menu(tmpPlanFile string) {
 	}
 
 	switch action {
-	case "Apply":
+	case "Apply Plan":
 		tfapply(tmpPlanFile)
 		return
 	case "Show Full Plan":
 		tfshow(tmpPlanFile)
-		menu(tmpPlanFile)
+		menu(tmpPlanFile, resources, args)
 		return
+	case "Do a target apply":
+		targetArgs := tftargetapply(resources)
+		os.Remove(tmpPlanFile)
+		newArgs := append(targetArgs, args...)
+		mainLoop(newArgs)
+		return
+	case "Exit":
+		clearTerminal()
+		fmt.Printf("%sCommand aborted.%s\n", colorYellow, colorReset)
+		os.Exit(0)
 	}
 }
 
+func mainLoop(args []string) {
+	tmpPlanFile := fmt.Sprintf("/tmp/tfplan%d", os.Getpid())
+	defer os.Remove(tmpPlanFile)
+
+	resources := tfplan(tmpPlanFile, args)
+	menu(tmpPlanFile, resources, args)
+}
+
 func main() {
+	clearTerminal()
+
 	performInit := flag.Bool("init", false, "Run `terraform init`")
 	performUpgrade := flag.Bool("init-upgrade", false, "Run `terraform init -upgrade`")
 	flag.Parse()
 	tfinit(*performInit, *performUpgrade)
 
 	args := flag.Args()
-
-	tmpPlanFile := fmt.Sprintf("/tmp/tfplan%d", os.Getpid())
-	defer os.Remove(tmpPlanFile)
-
-	tfplan(tmpPlanFile, args)
-	menu(tmpPlanFile)
+	mainLoop(args)
 }
