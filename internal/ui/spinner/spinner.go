@@ -1,4 +1,5 @@
-package main
+// Package spinner provides an animated terminal spinner for long-running operations.
+package spinner
 
 import (
 	"fmt"
@@ -23,8 +24,8 @@ var (
 // quitMsg is sent when the spinner should stop
 type quitMsg struct{}
 
-// spinnerModel represents the spinner state
-type spinnerModel struct {
+// model represents the spinner state
+type model struct {
 	spinner  spinner.Model
 	message  string
 	quitting bool
@@ -34,26 +35,33 @@ type spinnerModel struct {
 	wg       sync.WaitGroup
 }
 
-// NewSpinner creates a new bubbletea-based spinner
-func NewSpinner(message string) *spinnerModel {
+// Spinner provides a terminal spinner with a message.
+type Spinner struct {
+	model *model
+}
+
+// New creates a new bubbletea-based spinner.
+func New(message string) *Spinner {
 	s := spinner.New()
 	s.Spinner = spinners[0] // MiniDot spinner
 	s.Style = spinnerStyle
 
-	return &spinnerModel{
-		spinner: s,
-		message: message,
-		done:    make(chan struct{}),
+	return &Spinner{
+		model: &model{
+			spinner: s,
+			message: message,
+			done:    make(chan struct{}),
+		},
 	}
 }
 
-// Init implements tea.Model
-func (m spinnerModel) Init() tea.Cmd {
+// Init implements tea.Model.
+func (m model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-// Update implements tea.Model
-func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements tea.Model.
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
@@ -71,42 +79,42 @@ func (m spinnerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View implements tea.Model
-func (m spinnerModel) View() string {
+// View implements tea.Model.
+func (m model) View() string {
 	if m.quitting {
 		return ""
 	}
 	return fmt.Sprintf("%s %s", m.spinner.View(), textStyle.Render(m.message))
 }
 
-// Start begins the spinner animation
-func (m *spinnerModel) Start() {
-	m.wg.Add(1)
-	p := tea.NewProgram(m,
+// Start begins the spinner animation.
+func (s *Spinner) Start() {
+	s.model.wg.Add(1)
+	p := tea.NewProgram(s.model,
 		tea.WithoutCatchPanics(),
 		tea.WithMouseCellMotion(),
 	)
-	m.program = p
+	s.model.program = p
 
 	go func() {
-		defer m.wg.Done()
+		defer s.model.wg.Done()
 		if _, err := p.Run(); err != nil {
 			fmt.Printf("Error running spinner: %v\n", err)
 			os.Exit(1)
 		}
-		close(m.done)
+		close(s.model.done)
 	}()
 }
 
-// Stop ends the spinner animation
-func (m *spinnerModel) Stop() {
-	if m.program != nil {
-		m.program.Send(quitMsg{})
+// Stop ends the spinner animation.
+func (s *Spinner) Stop() {
+	if s.model.program != nil {
+		s.model.program.Send(quitMsg{})
 
 		// Wait for cleanup with timeout
 		cleanup := make(chan struct{})
 		go func() {
-			m.wg.Wait()
+			s.model.wg.Wait()
 			close(cleanup)
 		}()
 

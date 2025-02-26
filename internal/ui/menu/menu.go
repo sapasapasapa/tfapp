@@ -1,4 +1,5 @@
-package main
+// Package menu provides interactive terminal menu components.
+package menu
 
 import (
 	"fmt"
@@ -8,33 +9,33 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// MenuOption represents a single menu option
-type MenuOption struct {
+// Option represents a single menu option.
+type Option struct {
 	Name        string
 	Description string
 	Selected    string
 }
 
-// String implements the fmt.Stringer interface
-func (o MenuOption) String() string {
+// String implements the fmt.Stringer interface.
+func (o Option) String() string {
 	return fmt.Sprintf("%s - %s", o.Name, o.Description)
 }
 
-// Model represents the menu state
-type menuModel struct {
-	options  []MenuOption
+// model represents the menu state.
+type model struct {
+	options  []Option
 	cursor   int
-	selected *MenuOption
+	selected *Option
 	quitting bool
 }
 
-// Init implements tea.Model
-func (m menuModel) Init() tea.Cmd {
+// Init implements tea.Model.
+func (m model) Init() tea.Cmd {
 	return nil
 }
 
-// Update implements tea.Model
-func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update implements tea.Model.
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -67,8 +68,8 @@ var (
 	cursorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8239F3"))            // purple cursor
 )
 
-// View implements tea.Model
-func (m menuModel) View() string {
+// View implements tea.Model.
+func (m model) View() string {
 	var s strings.Builder
 
 	s.WriteString("Select Action\n\n")
@@ -95,9 +96,9 @@ func (m menuModel) View() string {
 	return s.String()
 }
 
-// ShowMenu displays an interactive menu and returns the selected option
-func ShowMenu() (string, error) {
-	options := []MenuOption{
+// Show displays an interactive menu and returns the selected option.
+func Show() (string, error) {
+	options := []Option{
 		{
 			Name:        "Apply Plan",
 			Description: "Execute the current plan",
@@ -120,17 +121,17 @@ func ShowMenu() (string, error) {
 		},
 	}
 
-	m := menuModel{
+	m := model{
 		options: options,
 	}
 
 	p := tea.NewProgram(m)
-	model, err := p.Run()
+	result, err := p.Run()
 	if err != nil {
-		return "", fmt.Errorf("error running menu: %v", err)
+		return "", fmt.Errorf("error running menu: %w", err)
 	}
 
-	finalModel := model.(menuModel)
+	finalModel := result.(model)
 	if finalModel.quitting || finalModel.selected == nil {
 		return "Exit", nil
 	}
