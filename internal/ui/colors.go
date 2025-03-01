@@ -1,14 +1,114 @@
 // Package ui provides user interface components and utilities.
 package ui
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"tfapp/internal/config"
+)
+
 // Color constants for terminal output.
 const (
-	ColorRed    = "\033[1;31m"
-	ColorGreen  = "\033[32m"
-	ColorYellow = "\033[33m"
-	ColorReset  = "\033[0m"
-	TextBold    = "\033[1m"
+	ColorReset = "\033[0m"
+	TextBold   = "\033[1m"
 )
+
+var (
+	// Default colors - will be overridden from config
+	ColorError   = "\033[1;31m"
+	ColorSuccess = "\033[32m"
+	ColorWarning = "\033[33m"
+	ColorInfo    = "\033[36m"
+
+	// Additional stored colors
+	ColorHighlight = "\033[38;2;130;57;243m"  // Purple for highlights (#8239F3)
+	ColorFaint     = "\033[38;2;119;119;119m" // Gray for less important text (#777)
+
+	// Store the loaded config
+	appConfig *config.Config
+)
+
+// InitColors initializes the colors from the provided configuration.
+func InitColors(cfg *config.Config) {
+	appConfig = cfg
+
+	// Update the color variables based on the configuration
+	ColorError = parseColorToAnsi(cfg.Colors.Error)
+	ColorSuccess = parseColorToAnsi(cfg.Colors.Success)
+	ColorWarning = parseColorToAnsi(cfg.Colors.Warning)
+	ColorInfo = parseColorToAnsi(cfg.Colors.Info)
+	ColorHighlight = parseColorToAnsi(cfg.Colors.Highlight)
+	ColorFaint = parseColorToAnsi(cfg.Colors.Faint)
+}
+
+// parseColorToAnsi converts a hex color string to an ANSI color code.
+func parseColorToAnsi(hexColor string) string {
+	// Strip the leading # if present
+	hexColor = strings.TrimPrefix(hexColor, "#")
+
+	// Handle simple 3-character hex colors
+	if len(hexColor) == 3 {
+		r := hexColor[0:1]
+		g := hexColor[1:2]
+		b := hexColor[2:3]
+		hexColor = r + r + g + g + b + b
+	}
+
+	// Parse the hex values
+	if len(hexColor) != 6 {
+		// Fall back to default if invalid
+		return "\033[37m" // White as fallback
+	}
+
+	r, _ := strconv.ParseInt(hexColor[0:2], 16, 0)
+	g, _ := strconv.ParseInt(hexColor[2:4], 16, 0)
+	b, _ := strconv.ParseInt(hexColor[4:6], 16, 0)
+
+	// Return the 24-bit color ANSI escape sequence
+	return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b)
+}
+
+// GetHexColorByName returns the hex color string for use with lipgloss.
+// This is preferred for lipgloss styling over GetColorByName which returns ANSI codes.
+func GetHexColorByName(name string) string {
+	if appConfig == nil {
+		switch strings.ToLower(name) {
+		case "highlight":
+			return "#8239F3" // Purple for highlights
+		case "faint":
+			return "#777777" // Gray for less important text
+		case "info":
+			return "#36c" // Cyan/Blue
+		case "success":
+			return "#2a2" // Green
+		case "warning":
+			return "#fa0" // Yellow/Orange
+		case "error":
+			return "#f33" // Red
+		default:
+			return "" // No color
+		}
+	}
+
+	switch strings.ToLower(name) {
+	case "info":
+		return appConfig.Colors.Info
+	case "success":
+		return appConfig.Colors.Success
+	case "warning":
+		return appConfig.Colors.Warning
+	case "error":
+		return appConfig.Colors.Error
+	case "highlight":
+		return appConfig.Colors.Highlight
+	case "faint":
+		return appConfig.Colors.Faint
+	default:
+		return ""
+	}
+}
 
 // Colorize adds ANSI color codes to terraform plan output.
 func Colorize(line string) string {
@@ -16,11 +116,50 @@ func Colorize(line string) string {
 		return line
 	}
 
-	line = replaceIfContains(line, "destroyed", ColorRed+"destroyed"+ColorReset)
-	line = replaceIfContains(line, "replaced", ColorRed+"replaced"+ColorReset)
-	line = replaceIfContains(line, "created", ColorGreen+"created"+ColorReset)
-	line = replaceIfContains(line, "updated in-place", ColorYellow+"updated in-place"+ColorReset)
+	line = replaceIfContains(line, "destroyed", ColorError+"destroyed"+ColorReset)
+	line = replaceIfContains(line, "replaced", ColorError+"replaced"+ColorReset)
+	line = replaceIfContains(line, "created", ColorSuccess+"created"+ColorReset)
+	line = replaceIfContains(line, "updated in-place", ColorWarning+"updated in-place"+ColorReset)
 	return line
+}
+
+// GetColorByName returns the ANSI color code for a named color.
+func GetColorByName(name string) string {
+	if appConfig == nil {
+		switch strings.ToLower(name) {
+		case "highlight":
+			return ColorHighlight
+		case "faint":
+			return ColorFaint
+		case "info":
+			return ColorInfo
+		case "success":
+			return ColorSuccess
+		case "warning":
+			return ColorWarning
+		case "error":
+			return ColorError
+		default:
+			return ColorReset
+		}
+	}
+
+	switch strings.ToLower(name) {
+	case "info":
+		return parseColorToAnsi(appConfig.Colors.Info)
+	case "success":
+		return parseColorToAnsi(appConfig.Colors.Success)
+	case "warning":
+		return parseColorToAnsi(appConfig.Colors.Warning)
+	case "error":
+		return parseColorToAnsi(appConfig.Colors.Error)
+	case "highlight":
+		return parseColorToAnsi(appConfig.Colors.Highlight)
+	case "faint":
+		return parseColorToAnsi(appConfig.Colors.Faint)
+	default:
+		return ColorReset
+	}
 }
 
 // Helper function to replace text only if it contains the substring.

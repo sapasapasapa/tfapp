@@ -18,7 +18,7 @@ type Executor interface {
 // PlanService defines operations related to Terraform plans.
 type PlanService interface {
 	// CreatePlan generates a Terraform plan and returns affected resources.
-	CreatePlan(ctx interface{}, planFilePath string, args []string) ([]Resource, error)
+	CreatePlan(ctx interface{}, planFilePath string, args []string, targeted bool) ([]Resource, error)
 	// ShowPlan displays the full details of a saved plan file.
 	ShowPlan(ctx interface{}, planFilePath string) error
 }

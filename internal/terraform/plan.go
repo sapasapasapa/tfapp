@@ -25,7 +25,7 @@ func NewPlanManager(executor models.Executor) *PlanManager {
 
 // CreatePlan generates a Terraform plan and returns a list of affected resources.
 // It saves the plan to the specified file path and runs `terraform plan`.
-func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []string) ([]models.Resource, error) {
+func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []string, targeted bool) ([]models.Resource, error) {
 	ctxTyped, ok := ctx.(context.Context)
 	if !ok {
 		return nil, fmt.Errorf("context type assertion failed")
@@ -35,13 +35,19 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 	planArgs = append(planArgs, args...)
 	resources := []models.Resource{}
 
-	err := p.executor.RunCommand(ctx, planArgs, "Creating terraform plan", false)
+	var printed_line string
+	if !targeted {
+		printed_line = "Creating terraform plan"
+	} else {
+		printed_line = "Creating terraform plan with targeted resources"
+	}
+	err := p.executor.RunCommand(ctx, planArgs, printed_line, false)
 	if err != nil {
 		return nil, fmt.Errorf("error executing terraform plan: %w", err)
 	}
 
 	fmt.Printf("%s%sTerraform plan has been successfully created!%s\n",
-		ui.ColorGreen, ui.TextBold, ui.ColorReset)
+		ui.ColorSuccess, ui.TextBold, ui.ColorReset)
 
 	fmt.Println("\nSummary of proposed changes:")
 

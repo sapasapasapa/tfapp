@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strings"
 
+	"tfapp/internal/ui"
+
+	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -26,10 +29,13 @@ type model struct {
 	options  []Option
 	cursor   int
 	quitting bool
+	list     list.Model
 }
 
 // Init implements tea.Model.
 func (m model) Init() tea.Cmd {
+	// Ensure styles are initialized
+	m.updateStyles()
 	return nil
 }
 
@@ -75,14 +81,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 var (
-	activeStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#8239F3")).Bold(true)
-	faintStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	cursorStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#8239F3"))
-	checkedStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	uncheckedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	keyBindingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
-	helpTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	instructionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
+	// These will be initialized properly in updateStyles
+	activeStyle      = lipgloss.NewStyle()
+	faintStyle       = lipgloss.NewStyle()
+	cursorStyle      = lipgloss.NewStyle()
+	checkedStyle     = lipgloss.NewStyle()
+	uncheckedStyle   = lipgloss.NewStyle()
+	keyBindingStyle  = lipgloss.NewStyle()
+	helpTextStyle    = lipgloss.NewStyle()
+	instructionStyle = lipgloss.NewStyle()
+	// Action type styles
+	createStyle  = lipgloss.NewStyle()
+	updateStyle  = lipgloss.NewStyle()
+	destroyStyle = lipgloss.NewStyle()
+	nameStyle    = lipgloss.NewStyle()
 )
 
 // View implements tea.Model.
@@ -93,7 +105,7 @@ func (m model) View() string {
 
 	for i, option := range m.options {
 		var cursor string
-		nameStyle := faintStyle
+		optNameStyle := nameStyle
 		checkedSymbol := "[ ] "
 		if option.Checked {
 			checkedSymbol = "[x] "
@@ -101,7 +113,7 @@ func (m model) View() string {
 
 		if m.cursor == i {
 			cursor = cursorStyle.Render("> ")
-			nameStyle = activeStyle
+			optNameStyle = activeStyle
 			if option.Checked {
 				checkedSymbol = checkedStyle.Render("[x] ")
 			} else {
@@ -116,11 +128,31 @@ func (m model) View() string {
 			}
 		}
 
-		// Render name, checkbox and description
-		s.WriteString(fmt.Sprintf("%s%s%s\n",
+		// Render name with checkbox
+		s.WriteString(fmt.Sprintf("%s%s%s",
 			cursor,
 			checkedSymbol,
-			nameStyle.Render(option.Name)))
+			optNameStyle.Render(option.Name)))
+
+		// Add description with appropriate color based on action type
+		if option.Description != "" {
+			var descStyle lipgloss.Style
+
+			switch option.Description {
+			case "create":
+				descStyle = createStyle
+			case "update":
+				descStyle = updateStyle
+			case "destroy":
+				descStyle = destroyStyle
+			default:
+				descStyle = faintStyle
+			}
+
+			s.WriteString(fmt.Sprintf(" - %s", descStyle.Render(option.Description)))
+		}
+
+		s.WriteString("\n")
 	}
 
 	// Add instructions at the bottom
@@ -135,30 +167,62 @@ func (m model) View() string {
 	return s.String()
 }
 
-// Show displays an interactive checkbox menu and returns the selected options.
+// Show displays a checkbox menu with the provided options.
 func Show(options []Option) ([]Option, error) {
+	if len(options) == 0 {
+		return nil, nil
+	}
+
 	m := model{
 		options: options,
 	}
 
+	// Initialize styles with latest config
+	m.updateStyles()
+
 	p := tea.NewProgram(m)
-	result, err := p.Run()
+	finalModel, err := p.Run()
 	if err != nil {
-		return nil, fmt.Errorf("error running checkbox menu: %w", err)
+		return nil, err
 	}
 
-	checkboxModel := result.(model)
-	if checkboxModel.quitting {
+	if finalModel.(model).quitting {
 		return nil, nil
 	}
 
-	// Filter out only the checked options
 	var selected []Option
-	for _, option := range checkboxModel.options {
-		if option.Checked {
-			selected = append(selected, option)
+	for _, opt := range finalModel.(model).options {
+		if opt.Checked {
+			selected = append(selected, opt)
 		}
 	}
 
 	return selected, nil
+}
+
+// updateStyles sets the styles for the checkbox menu based on terminal dimensions.
+func (m *model) updateStyles() {
+	// Use configured highlight color
+	highlightColor := lipgloss.Color(ui.GetHexColorByName("highlight"))
+	faintColor := lipgloss.Color(ui.GetHexColorByName("faint"))
+	successColor := lipgloss.Color(ui.GetHexColorByName("success"))
+	infoColor := lipgloss.Color(ui.GetHexColorByName("info"))
+	warningColor := lipgloss.Color(ui.GetHexColorByName("warning"))
+	errorColor := lipgloss.Color(ui.GetHexColorByName("error"))
+
+	// Update the styles to use the configured colors
+	activeStyle = lipgloss.NewStyle().Foreground(highlightColor).Bold(true)
+	faintStyle = lipgloss.NewStyle().Foreground(faintColor)
+	cursorStyle = lipgloss.NewStyle().Foreground(highlightColor)
+	checkedStyle = lipgloss.NewStyle().Foreground(successColor)
+	uncheckedStyle = lipgloss.NewStyle().Foreground(faintColor)
+	keyBindingStyle = lipgloss.NewStyle().Foreground(infoColor)
+	helpTextStyle = lipgloss.NewStyle().Foreground(faintColor)
+	instructionStyle = lipgloss.NewStyle().Foreground(faintColor)
+
+	// Update action styles
+	nameStyle = lipgloss.NewStyle().Foreground(faintColor)
+	createStyle = lipgloss.NewStyle().Foreground(successColor) // Green
+	updateStyle = lipgloss.NewStyle().Foreground(warningColor) // Yellow
+	destroyStyle = lipgloss.NewStyle().Foreground(errorColor)  // Red
 }

@@ -9,6 +9,7 @@ import (
 	apperrors "tfapp/internal/errors"
 	"tfapp/internal/models"
 	"tfapp/internal/terraform"
+	"tfapp/internal/ui"
 	"tfapp/internal/ui/checkbox"
 	"tfapp/internal/ui/menu"
 	"tfapp/internal/utils"
@@ -48,13 +49,13 @@ func (a *App) Run(ctx context.Context, flags *Flags) error {
 	}
 
 	// Generate the plan
-	resources, err := a.tfPlan.CreatePlan(ctx, tmpPlanFile, flags.AdditionalFlags)
+	resources, err := a.tfPlan.CreatePlan(ctx, tmpPlanFile, flags.AdditionalFlags, false)
 	if err != nil {
 		return fmt.Errorf("Planning failed: %w", err)
 	}
 
 	// Show the menu for the user to choose an action
-	return a.handleMenuSelection(ctx, tmpPlanFile, resources)
+	return a.handleMenuSelection(ctx, tmpPlanFile, resources, flags)
 }
 
 // handleInit processes the initialization flags.
@@ -75,7 +76,7 @@ func (a *App) handleInit(ctx context.Context, performInit, performUpgrade bool) 
 }
 
 // handleMenuSelection displays the menu and processes the user's selection.
-func (a *App) handleMenuSelection(ctx context.Context, planFile string, resources []models.Resource) error {
+func (a *App) handleMenuSelection(ctx context.Context, planFile string, resources []models.Resource, flags *Flags) error {
 	selection, err := menu.Show()
 	if err != nil {
 		return apperrors.NewUserInteractionError("menu selection", "Failed to show menu", err)
@@ -83,12 +84,20 @@ func (a *App) handleMenuSelection(ctx context.Context, planFile string, resource
 
 	switch selection {
 	case "Apply Plan":
+		menu.ClearMenuOutput()
 		return a.tfApply.Apply(ctx, planFile)
 	case "Show Full Plan":
-		return a.tfPlan.ShowPlan(ctx, planFile)
+		menu.ClearMenuOutput()
+		err := a.tfPlan.ShowPlan(ctx, planFile)
+		if err != nil {
+			return err
+		}
+		return a.handleMenuSelection(ctx, planFile, resources, flags)
 	case "Do a target apply":
-		return a.handleTargetApply(ctx, resources)
+		menu.ClearMenuOutput()
+		return a.handleTargetApply(ctx, resources, flags)
 	case "Exit":
+		menu.ClearMenuOutput()
 		fmt.Println("Exiting without applying changes.")
 		return nil
 	default:
@@ -101,9 +110,7 @@ func (a *App) handleMenuSelection(ctx context.Context, planFile string, resource
 }
 
 // handleTargetApply processes targeted resource application.
-func (a *App) handleTargetApply(ctx context.Context, resources []models.Resource) error {
-	utils.ClearTerminal()
-
+func (a *App) handleTargetApply(ctx context.Context, resources []models.Resource, flags *Flags) error {
 	// Convert resources to checkbox options
 	checkboxOptions := make([]checkbox.Option, 0, len(resources))
 	for _, resource := range resources {
@@ -121,18 +128,30 @@ func (a *App) handleTargetApply(ctx context.Context, resources []models.Resource
 	}
 
 	if selectedOptions == nil || len(selectedOptions) == 0 {
-		fmt.Println("No resources selected for targeted apply.")
+		utils.ClearTerminal()
+		fmt.Printf("%sNo resources selected for targeted apply.%s\n", ui.ColorInfo, ui.ColorReset)
 		return nil
 	}
 
-	// Extract the selected resource names
-	targets := make([]string, 0, len(selectedOptions))
+	utils.ClearTerminal()
 	for _, opt := range selectedOptions {
-		targets = append(targets, opt.Name)
+		flags.AdditionalFlags = append(flags.AdditionalFlags, "-target="+opt.Name)
 	}
 
-	// Apply to the selected targets
-	return a.tfApply.ApplyTargets(ctx, targets)
+	tmpPlanFile, err := createTempPlanFile()
+	if err != nil {
+		return fmt.Errorf("Failed to create temporary plan file: %w", err)
+	}
+	defer os.Remove(tmpPlanFile) // Clean up the temporary file when done
+
+	// Generate the plan
+	new_resources, err := a.tfPlan.CreatePlan(ctx, tmpPlanFile, flags.AdditionalFlags, true)
+	if err != nil {
+		return fmt.Errorf("Planning failed: %w", err)
+	}
+
+	// Show the menu for the user to choose an action
+	return a.handleMenuSelection(ctx, tmpPlanFile, new_resources, flags)
 }
 
 // createTempPlanFile creates a temporary file for the Terraform plan.

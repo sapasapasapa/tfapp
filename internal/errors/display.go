@@ -20,27 +20,27 @@ func DisplayError(err error) {
 	switch {
 	case IsValidationError(err):
 		// Validation errors are shown in yellow
-		fmt.Fprintf(os.Stderr, "%sValidation Error:%s %s\n", ui.ColorYellow, ui.ColorReset, errMsg)
+		fmt.Fprintf(os.Stderr, "%sValidation Error:%s %s\n", ui.ColorWarning, ui.ColorReset, errMsg)
 
 	case IsUserInteractionError(err):
 		// User interaction errors are shown in yellow
-		fmt.Fprintf(os.Stderr, "%sInput Error:%s %s\n", ui.ColorYellow, ui.ColorReset, errMsg)
+		fmt.Fprintf(os.Stderr, "%sInput Error:%s %s\n", ui.ColorWarning, ui.ColorReset, errMsg)
 
 	case IsConfigurationError(err):
 		// Configuration errors are shown in red
-		fmt.Fprintf(os.Stderr, "%sConfiguration Error:%s %s\n", ui.ColorRed, ui.ColorReset, errMsg)
+		fmt.Fprintf(os.Stderr, "%sConfiguration Error:%s %s\n", ui.ColorError, ui.ColorReset, errMsg)
 
 	case IsErrUserAborted(err):
 		// User aborted operations are shown in yellow
-		fmt.Fprintf(os.Stderr, "%sOperation Aborted:%s %s\n", ui.ColorYellow, ui.ColorReset, errMsg)
+		fmt.Fprintf(os.Stderr, "%sOperation Aborted:%s %s\n", ui.ColorWarning, ui.ColorReset, errMsg)
 
 	case strings.Contains(errMsg, "Planning failed"):
 		// Planning errors are shown entirely in red
-		fmt.Fprintf(os.Stderr, "%s%s%s\n\n", ui.ColorRed, errMsg, ui.ColorReset)
+		fmt.Fprintf(os.Stderr, "%s%s%s\n\n", ui.ColorError, errMsg, ui.ColorReset)
 
 	default:
 		// All other errors are shown in red
-		fmt.Fprintf(os.Stderr, "%sError:%s %s\n", ui.ColorRed, ui.ColorReset, errMsg)
+		fmt.Fprintf(os.Stderr, "%sError:%s %s\n", ui.ColorError, ui.ColorReset, errMsg)
 	}
 }
 

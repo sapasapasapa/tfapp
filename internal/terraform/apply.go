@@ -40,7 +40,7 @@ func (a *ApplyManager) Apply(ctx interface{}, planFilePath string) error {
 		return nil
 	}
 
-	fmt.Printf("%sApply aborted.%s\n", ui.ColorYellow, ui.ColorReset)
+	fmt.Printf("%sApply aborted.%s\n", ui.ColorWarning, ui.ColorReset)
 	return nil
 }
 
@@ -71,7 +71,7 @@ func (a *ApplyManager) ApplyTargets(ctx interface{}, targets []string) error {
 		return nil
 	}
 
-	fmt.Printf("%sTargeted apply aborted.%s\n", ui.ColorYellow, ui.ColorReset)
+	fmt.Printf("%sTargeted apply aborted.%s\n", ui.ColorWarning, ui.ColorReset)
 	return nil
 }
 
@@ -90,7 +90,7 @@ func (a *ApplyManager) initOnly(ctx interface{}) error {
 		return fmt.Errorf("error executing terraform init: %w", err)
 	}
 	fmt.Printf("%s%sTerraform has been successfully initialized!%s\n",
-		ui.ColorGreen, ui.TextBold, ui.ColorReset)
+		ui.ColorSuccess, ui.TextBold, ui.ColorReset)
 	return nil
 }
 
@@ -99,7 +99,7 @@ func (a *ApplyManager) initOnly(ctx interface{}) error {
 func (a *ApplyManager) initUpgrade(ctx interface{}) error {
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Printf("Using `%s-init-upgrade%s` will run `%sterraform init -upgrade%s`.\n",
-		ui.ColorYellow, ui.ColorReset, ui.ColorYellow, ui.ColorReset)
+		ui.ColorWarning, ui.ColorReset, ui.ColorWarning, ui.ColorReset)
 	fmt.Println("This will update providers to the latest version, within the specified version constraints, and could potentially cause breaking changes.")
 	fmt.Print("Do you wish to proceed? [yes/No]: ")
 	response, err := reader.ReadString('\n')
@@ -113,11 +113,11 @@ func (a *ApplyManager) initUpgrade(ctx interface{}) error {
 			return fmt.Errorf("error executing terraform init -upgrade: %w", err)
 		}
 		fmt.Printf("%s%sTerraform has been successfully initialized and upgraded!%s\n",
-			ui.ColorGreen, ui.TextBold, ui.ColorReset)
+			ui.ColorSuccess, ui.TextBold, ui.ColorReset)
 		return nil
 	}
 
-	fmt.Printf("%sCommand aborted.%s\n", ui.ColorYellow, ui.ColorReset)
+	fmt.Printf("%sCommand aborted.%s\n", ui.ColorWarning, ui.ColorReset)
 	return nil
 }
 

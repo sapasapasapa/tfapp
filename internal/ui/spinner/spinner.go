@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"tfapp/internal/ui"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -17,9 +19,16 @@ var (
 	spinners = []spinner.Spinner{
 		spinner.MiniDot,
 	}
-	textStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	spinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8239F3"))
+	textStyle    = lipgloss.NewStyle() // Default color for text
+	spinnerStyle = lipgloss.NewStyle()
 )
+
+// Initialize styles with proper colors
+func init() {
+	// Use the highlight color for the spinner
+	spinnerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(ui.GetHexColorByName("highlight")))
+	// Keep textStyle as default (no foreground color set)
+}
 
 // quitMsg is sent when the spinner should stop
 type quitMsg struct{}
