@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +13,18 @@ import (
 // Config represents the application configuration.
 type Config struct {
 	Colors ColorConfig `yaml:"colors"`
+	UI     UIConfig    `yaml:"ui"`
+}
+
+// UIConfig holds the UI configuration values.
+type UIConfig struct {
+	// Type of spinner to use for loading animations
+	// Available options: MiniDot, Dot, Line, Jump, Pulse, Points, Globe, Moon, Monkey, Meter
+	// See full reference: https://pkg.go.dev/github.com/charmbracelet/bubbles@v0.20.0/spinner
+	SpinnerType string `yaml:"spinner_type"`
+
+	// Character to use for the cursor in menus (default: ">")
+	CursorChar string `yaml:"cursor_char"`
 }
 
 // ColorConfig holds the color configuration values.
@@ -34,6 +47,10 @@ func DefaultConfig() *Config {
 			Error:     "#f33", // Red
 			Highlight: "#83f", // Purple
 			Faint:     "#777", // Gray
+		},
+		UI: UIConfig{
+			SpinnerType: "MiniDot", // Default spinner type
+			CursorChar:  ">",       // Default cursor character
 		},
 	}
 }
@@ -100,8 +117,20 @@ func createDefaultConfig(filename string) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
+	// Add comments for documentation
+	yamlString := string(data)
+
+	// Add spinner documentation
+	yamlString = strings.Replace(yamlString,
+		"ui:",
+		`ui:
+  # For spinner_type, available options are:
+  # MiniDot, Dot, Line, Jump, Pulse, Points, Globe, Moon, Monkey, Meter
+  # See: https://pkg.go.dev/github.com/charmbracelet/bubbles@v0.20.0/spinner`,
+		1)
+
 	// Write to file
-	if err := os.WriteFile(filename, data, 0644); err != nil {
+	if err := os.WriteFile(filename, []byte(yamlString), 0644); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 

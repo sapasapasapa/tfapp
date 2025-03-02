@@ -85,11 +85,12 @@ func (m *model) updateStyles() {
 
 var (
 	// These will be initialized properly in updateStyles
-	activeStyle      = lipgloss.NewStyle()
-	faintStyle       = lipgloss.NewStyle()
-	cursorStyle      = lipgloss.NewStyle()
-	nameStyle        = lipgloss.NewStyle()
-	descriptionStyle = lipgloss.NewStyle()
+	activeStyle            = lipgloss.NewStyle()
+	faintStyle             = lipgloss.NewStyle()
+	cursorStyle            = lipgloss.NewStyle()
+	nameStyle              = lipgloss.NewStyle()
+	descriptionStyle       = lipgloss.NewStyle()
+	activeDescriptionStyle = lipgloss.NewStyle()
 )
 
 // View implements tea.Model.
@@ -104,8 +105,9 @@ func (m model) View() string {
 		optDescStyle := descriptionStyle
 
 		if m.cursor == i {
-			cursor = cursorStyle.Render(">")
+			cursor = cursorStyle.Render(ui.GetCursorChar())
 			optNameStyle = activeStyle
+			optDescStyle = activeDescriptionStyle
 		} else {
 			cursor = " "
 		}

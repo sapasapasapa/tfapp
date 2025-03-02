@@ -247,3 +247,19 @@ func doReplace(s, old, new string, n int) string {
 	}
 	return string(result)
 }
+
+// GetSpinnerType returns the configured spinner type or the default.
+func GetSpinnerType() string {
+	if appConfig == nil {
+		return "MiniDot" // Default spinner type
+	}
+	return appConfig.UI.SpinnerType
+}
+
+// GetCursorChar returns the configured cursor character or the default.
+func GetCursorChar() string {
+	if appConfig == nil {
+		return ">" // Default cursor character
+	}
+	return appConfig.UI.CursorChar
+}

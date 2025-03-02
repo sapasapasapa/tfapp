@@ -24,23 +24,23 @@ func main() {
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signalChan
-		fmt.Println("\nReceived interrupt signal, shutting down...")
+		fmt.Printf("%s\nReceived interrupt signal, shutting down...%s\n", ui.ColorInfo, ui.ColorReset)
 		cancel()
 	}()
 
 	// Load configuration
 	cfg, configCreated, err := config.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Error loading configuration: %s\n", err)
-		fmt.Fprintln(os.Stderr, "Continuing with default settings...")
+		fmt.Fprintf(os.Stderr, "%sWarning: Error loading configuration: %s%s\n", ui.ColorWarning, err, ui.ColorReset)
+		fmt.Fprintf(os.Stderr, "%sContinuing with default settings...%s\n", ui.ColorWarning, ui.ColorReset)
 		cfg = config.DefaultConfig()
 	}
 
 	// Display a message if the config was created
 	if configCreated {
 		configPath, _ := config.ConfigFilePath()
-		fmt.Printf("\nCreated default configuration file at %s\n", configPath)
-		fmt.Println("You can edit this file to customize the application colors.")
+		fmt.Printf("%sCreated default configuration file at %s%s\n", ui.ColorInfo, configPath, ui.ColorReset)
+		fmt.Printf("%sYou can edit this file to customize the application colors.%s\n", ui.ColorInfo, ui.ColorReset)
 		fmt.Println()
 	}
 

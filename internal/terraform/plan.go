@@ -90,7 +90,7 @@ func (p *PlanManager) ShowPlan(ctx interface{}, planFilePath string) error {
 		return fmt.Errorf("context type assertion failed")
 	}
 
-	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", "-no-color", planFilePath)
+	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", planFilePath)
 	tfshow.Stderr = os.Stderr
 	output, err := tfshow.Output()
 	if err != nil {

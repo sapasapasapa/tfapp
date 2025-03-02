@@ -112,7 +112,7 @@ func (m model) View() string {
 		}
 
 		if m.cursor == i {
-			cursor = cursorStyle.Render("> ")
+			cursor = cursorStyle.Render(ui.GetCursorChar() + " ")
 			optNameStyle = activeStyle
 			if option.Checked {
 				checkedSymbol = checkedStyle.Render("[x] ")

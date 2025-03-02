@@ -14,11 +14,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// spinnerMap maps string names to spinner types
+var spinnerMap = map[string]spinner.Spinner{
+	"MiniDot": spinner.MiniDot,
+	"Dot":     spinner.Dot,
+	"Line":    spinner.Line,
+	"Jump":    spinner.Jump,
+	"Pulse":   spinner.Pulse,
+	"Points":  spinner.Points,
+	"Globe":   spinner.Globe,
+	"Moon":    spinner.Moon,
+	"Monkey":  spinner.Monkey,
+	"Meter":   spinner.Meter,
+}
+
 var (
-	// Available spinners
-	spinners = []spinner.Spinner{
-		spinner.MiniDot,
-	}
 	textStyle    = lipgloss.NewStyle() // Default color for text
 	spinnerStyle = lipgloss.NewStyle()
 )
@@ -52,7 +62,16 @@ type Spinner struct {
 // New creates a new bubbletea-based spinner.
 func New(message string) *Spinner {
 	s := spinner.New()
-	s.Spinner = spinners[0] // MiniDot spinner
+
+	// Get the configured spinner type
+	spinnerType := ui.GetSpinnerType()
+	if spin, ok := spinnerMap[spinnerType]; ok {
+		s.Spinner = spin
+	} else {
+		// Fallback to default if spinner type not recognized
+		s.Spinner = spinner.MiniDot
+	}
+
 	s.Style = spinnerStyle
 
 	return &Spinner{
