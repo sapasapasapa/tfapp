@@ -28,6 +28,9 @@ var (
 
 	// Store the loaded config
 	appConfig *config.Config
+
+	// Text formatting constants
+	TextUnderline = "\033[4m" // ANSI escape sequence for underlined text
 )
 
 // InitColors initializes the colors from the provided configuration.

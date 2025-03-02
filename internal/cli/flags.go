@@ -3,16 +3,19 @@ package cli
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 
 	apperrors "tfapp/internal/errors"
+	"tfapp/internal/ui"
 )
 
 // Flags represents the command-line flags for the application.
 type Flags struct {
 	Init            bool
 	InitUpgrade     bool
+	Help            bool
 	AdditionalFlags []string
 }
 
@@ -21,6 +24,7 @@ func ParseFlags() *Flags {
 	// Define command-line flags
 	init := flag.Bool("init", false, "Run terraform init before planning")
 	initUpgrade := flag.Bool("init-upgrade", false, "Run terraform init -upgrade before planning")
+	help := flag.Bool("help", false, "Display help information")
 
 	// Parse the flags
 	flag.Parse()
@@ -29,7 +33,14 @@ func ParseFlags() *Flags {
 	flags := &Flags{
 		Init:            *init,
 		InitUpgrade:     *initUpgrade,
+		Help:            *help,
 		AdditionalFlags: flag.Args(),
+	}
+
+	// Display help if requested
+	if flags.Help {
+		DisplayHelp()
+		os.Exit(0)
 	}
 
 	// Validate the flags
@@ -38,6 +49,43 @@ func ParseFlags() *Flags {
 	}
 
 	return flags
+}
+
+// DisplayHelp shows the application usage and help information
+func DisplayHelp() {
+	fmt.Printf("%s%sTFApp - Enhanced Terraform Experience%s\n\n", ui.ColorInfo, ui.TextBold, ui.ColorReset)
+
+	fmt.Println("USAGE:")
+	fmt.Printf("  tfapp [tfapp-flags] -- [terraform-arguments]\n\n")
+
+	fmt.Println("FLAGS:")
+	fmt.Printf("  %-20s %s\n", "-init", "Run terraform init before creating a plan")
+	fmt.Printf("  %-20s %s\n", "-init-upgrade", "Run terraform init -upgrade to update modules and providers")
+	fmt.Printf("  %-20s %s\n\n", "-help, --help", "Display this help information")
+
+	fmt.Println("EXAMPLES:")
+	fmt.Printf("  # Basic usage\n")
+	fmt.Printf("  tfapp\n\n")
+
+	fmt.Printf("  # Initialize before planning\n")
+	fmt.Printf("  tfapp -init\n\n")
+
+	fmt.Printf("  # Initialize with module updates\n")
+	fmt.Printf("  tfapp -init-upgrade\n\n")
+
+	fmt.Printf("  # Pass variables to terraform\n")
+	fmt.Printf("  tfapp -- -var=\"environment=production\" -var=\"region=us-west-2\"\n\n")
+
+	fmt.Printf("  # Use a variable file\n")
+	fmt.Printf("  tfapp -- -var-file=production.tfvars\n\n")
+
+	fmt.Printf("  # Use auto-approval (non-interactive mode)\n")
+	fmt.Printf("  tfapp -- -auto-approve\n\n")
+
+	fmt.Println("")
+
+	fmt.Printf("For more detailed information, please see the documentation at: %s%shttps://github.com/sapasapasapa/tfapp/tree/refactor/refactor-project/docs%s\n",
+		ui.ColorInfo, ui.TextUnderline, ui.ColorReset)
 }
 
 // validateFlags checks if the combination of flags is valid.
