@@ -2,6 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-0.1.0-orange.svg)](https://github.com/yourusername/tfapp/releases)
 
 A delightful, feature-rich interface for Terraform that makes infrastructure management more intuitive and efficient.
 
@@ -25,6 +26,9 @@ git clone https://github.com/yourusername/tfapp.git
 cd tfapp
 go build -o build/tfapp ./cmd/tfapp
 sudo cp build/tfapp /usr/local/bin/
+
+# Check installation
+tfapp -version
 
 # Use it in your Terraform project
 cd /path/to/terraform/project
