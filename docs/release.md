@@ -8,6 +8,8 @@ This document outlines the process for releasing new versions of TFApp.
 - GitHub account with access to the repository
 - GitHub Personal Access Token with `repo` scope (for publishing to Homebrew tap)
 
+For detailed instructions on setting up the GitHub token, see [GitHub Token Setup](./github-token-setup.md).
+
 ## Configuration
 
 TFApp uses GoReleaser for building and releasing binaries and publishing to Homebrew. The configuration is in `.goreleaser.yml` in the root of the repository.
@@ -34,6 +36,8 @@ Key configuration aspects:
    # Push the tag to GitHub
    git push origin v0.1.0
    ```
+
+   For more detailed instructions on tagging releases, see [Tagging Releases](./tagging-releases.md).
 
 3. **Automated Release Process:**
    Once the tag is pushed, GitHub Actions will automatically:
