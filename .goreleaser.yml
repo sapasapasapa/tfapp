@@ -1,0 +1,73 @@
+version: 2
+project_name: tfapp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/tfapp
+    id: "tfapp"
+    binary: tfapp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X tfapp/internal/version.Version={{.Version}}
+      - -X tfapp/internal/version.Commit={{.Commit}}
+      - -X tfapp/internal/version.Date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: darwin
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+
+brews:
+  - name: tfapp
+    repository:
+      owner: sapasapasapa
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GH_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    directory: Formula
+    homepage: "https://github.com/sapasapasapa/tfapp"
+    description: "A TUI Terraform management application"
+    license: "MIT"
+    install: |
+      bin.install "tfapp"
+    test: |
+      system "#{bin}/tfapp", "--version"
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch 

@@ -148,48 +148,7 @@ To add support for a new Terraform command:
 2. Implement the service in `internal/terraform/`
 3. Add relevant UI handling in `internal/cli/commands.go`
 
-## Testing
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run specific package tests
-go test ./internal/terraform
-
-# Run tests with coverage
-go test -cover ./...
-
-# Generate coverage report
-go test -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-```
-
-### Writing Tests
-
-When adding new features, include tests in the appropriate package:
-
-```go
-package yourpackage
-
-import "testing"
-
-func TestYourFeature(t *testing.T) {
-    // Test setup
-    
-    // Test execution
-    result := YourFunction()
-    
-    // Assertions
-    if result != expectedResult {
-        t.Errorf("Expected %v, got %v", expectedResult, result)
-    }
-}
-```
-
-## Building and Releasing
+## Building 
 
 ### Building for Multiple Platforms
 
@@ -202,18 +161,6 @@ GOOS=darwin GOARCH=amd64 go build -o build/tfapp-darwin-amd64 ./cmd/tfapp
 
 # Build for Windows
 GOOS=windows GOARCH=amd64 go build -o build/tfapp-windows-amd64.exe ./cmd/tfapp
-```
-
-### Creating a Release
-
-1. Update version information
-2. Build for all platforms
-3. Create release notes
-4. Tag the release in git
-
-```bash
-git tag -a v1.0.0 -m "Version 1.0.0"
-git push origin v1.0.0
 ```
 
 ## Style Guide

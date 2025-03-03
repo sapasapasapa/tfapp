@@ -45,11 +45,11 @@ tfapp --version
 
 ```bash
 # Install via Homebrew (macOS and Linux)
-brew tap sapasapasapa/tap
+brew tap sapasapasapa/homebrew-tap
 brew install tfapp
 
 # Or in a single command
-brew install sapasapasapa/tap/tfapp
+brew install sapasapasapa/homebrew-tap/tfapp
 ```
 
 ### Using TFApp
@@ -62,7 +62,6 @@ tfapp -h
 cd /path/to/terraform/project
 tfapp
 ```
-
 For detailed or alternative installation instructions and troubleshooting, see our [Installation Guide](docs/installation.md).
 
 ## 📚 Documentation
@@ -109,6 +108,34 @@ For detailed information, check our documentation:
 ## 👥 Contributing
 
 Contributions are welcome! Check out our [Development Guide](docs/development.md) to get started.
+
+## 🚀 Releasing
+
+TFApp uses [GoReleaser](https://goreleaser.com/) for building and publishing releases.
+
+### Creating a new release
+
+1. Tag a new version:
+```bash
+git tag -a v0.1.0 -m "First release"
+git push origin v0.1.0
+```
+
+2. GitHub Actions will automatically build and release to:
+   - GitHub Releases page
+   - Homebrew tap (sapasapasapa/homebrew-tap)
+
+### Local testing
+
+To test the release process locally without publishing:
+
+```bash
+# Install GoReleaser
+go install github.com/goreleaser/goreleaser@latest
+
+# Test build without publishing
+goreleaser release --snapshot --clean --skip=publish
+```
 
 ## 📜 License
 
