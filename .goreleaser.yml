@@ -1,0 +1,68 @@
+# Build customization
+builds:
+  - binary: tfapp
+    id: tfapp
+    main: ./cmd/tfapp
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X tfapp/internal/version.buildDate={{.Date}}
+      - -X tfapp/internal/version.gitCommit={{.Commit}}
+      - -X tfapp/internal/version.goVersion={{.Env.GOVERSION}}
+
+# Archive customization
+archives:
+  - id: tfapp
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - docs/*
+
+# Checksum generation
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# Homebrew formula configuration
+brews:
+  - name: tfapp
+    tap:
+      owner: sapasapasapa
+      name: homebrew-tap
+    commit_author:
+      name: goreleaserbot
+      email: goreleaser@example.com
+    homepage: "https://github.com/sapasapasapa/tfapp"
+    description: "Enhanced Terraform Experience with an interactive interface"
+    license: "MIT"
+    folder: Formula
+    install: |
+      bin.install "tfapp"
+    test: |
+      system "#{bin}/tfapp", "-version"
+    dependencies:
+      - name: terraform
+    caveats: |
+      tfapp requires Terraform to be installed and available in your PATH.
+      For more information, visit: https://github.com/sapasapasapa/tfapp
+
+# Release configuration
+release:
+  github:
+    owner: sapasapasapa
+    name: tfapp
+  prerelease: auto
+  draft: false
+  name_template: "v{{.Version}}" 
