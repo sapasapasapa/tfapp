@@ -6,7 +6,7 @@
 
 A delightful, feature-rich interface for Terraform that makes infrastructure management more intuitive and efficient.
 
-![TFApp Demo](https://via.placeholder.com/800x450.png?text=TFApp+Demo+Image)
+![TFApp Demo](.github/demo.gif)
 
 ## ✨ Key Features
 
@@ -17,23 +17,53 @@ A delightful, feature-rich interface for Terraform that makes infrastructure man
 
 ## 🚀 Quick Start
 
+### System Requirements
+
+- **Go**: Version 1.24 or later
+- **Terraform**: CLI installed and available in PATH
+- **Operating Systems**: Compatible with Linux, macOS, and Windows
+
+### Installation Methods
+
+#### Install from Binary
+
 ```bash
-# Make sure you have Go and Terraform installed
-# Go 1.24+ required
+# Download the latest release
+curl -LO https://github.com/yourusername/tfapp/releases/latest/download/tfapp_$(uname -s)_$(uname -m).tar.gz
 
-# Install from source
-git clone https://github.com/yourusername/tfapp.git
-cd tfapp
-go build -o build/tfapp ./cmd/tfapp
-sudo cp build/tfapp /usr/local/bin/
+# Extract the binary
+tar -xzf tfapp_$(uname -s)_$(uname -m).tar.gz
 
+# Move to a location in your PATH
+sudo mv tfapp /usr/local/bin/
+
+# Verify installation
+tfapp --version
+```
+
+#### Using Homebrew
+
+```bash
+# Install via Homebrew (macOS and Linux)
+brew tap sapasapasapa/tap
+brew install tfapp
+
+# Or in a single command
+brew install sapasapasapa/tap/tfapp
+```
+
+### Using TFApp
+
+```bash
 # Check installation
-tfapp -version
+tfapp -h
 
 # Use it in your Terraform project
 cd /path/to/terraform/project
 tfapp
 ```
+
+For detailed or alternative installation instructions and troubleshooting, see our [Installation Guide](docs/installation.md).
 
 ## 📚 Documentation
 

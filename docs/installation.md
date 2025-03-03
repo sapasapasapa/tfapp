@@ -49,6 +49,26 @@ terraform version
    tfapp --version
    ```
 
+### Using Homebrew
+
+For macOS and Linux users, Homebrew provides a simple way to install tfapp:
+
+1. Add the tap and install tfapp:
+   ```bash
+   brew tap sapasapasapa/tap
+   brew install tfapp
+   ```
+
+   Alternatively, you can install it in a single command:
+   ```bash
+   brew install sapasapasapa/tap/tfapp
+   ```
+
+2. Verify the installation:
+   ```bash
+   tfapp --version
+   ```
+
 ### Build from Source
 
 Building from source gives you the latest code and the ability to customize the build.
