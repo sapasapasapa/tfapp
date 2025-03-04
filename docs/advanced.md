@@ -15,6 +15,7 @@ TFApp's targeted apply feature allows you to selectively apply changes to specif
 
 ### How to Use Targeted Applies
 
+#### You don't know what you want to target
 1. Run TFApp normally:
    ```bash
    tfapp
@@ -34,7 +35,7 @@ TFApp's targeted apply feature allows you to selectively apply changes to specif
    - Show Full Plan: See the targeted plan details
    - Exit: Cancel the operation
 
-### Behind the Scenes
+**Behind the scenes**
 
 When you select resources for targeted apply, TFApp:
 
@@ -42,16 +43,12 @@ When you select resources for targeted apply, TFApp:
 2. Generates a new plan with only those targets
 3. Presents the menu again for the targeted plan
 
-### Example: Targeted Deployment
+#### You know what you want to target
 
-```bash
-# Start TFApp
-tfapp
-
-# Select "Do a target apply" in the menu
-# Select only the database resources
-# Apply the targeted plan
-```
+1. Run TFApp with the `-target` flag:
+   ```bash
+   tfapp -- -target=resource1 -target=resource2
+   ```
 
 ## Managing Terraform Modules
 

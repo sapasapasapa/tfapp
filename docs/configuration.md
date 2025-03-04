@@ -112,56 +112,6 @@ ln -sf ~/.config/tfapp/config-dark.yaml ~/.config/tfapp/config.yaml
 ln -sf ~/.config/tfapp/config-light.yaml ~/.config/tfapp/config.yaml
 ```
 
-## Configuration Examples
-
-### High-Contrast Theme
-
-```yaml
-colors:
-  info: "#00AAFF"
-  success: "#00FF00"
-  warning: "#FFAA00"
-  error: "#FF0000"
-  highlight: "#FF00FF"
-  faint: "#AAAAAA"
-
-ui:
-  spinner_type: "Jump"
-  cursor_char: "→"
-```
-
-### Minimal Theme
-
-```yaml
-colors:
-  info: "blue"
-  success: "green"
-  warning: "yellow"
-  error: "red"
-  highlight: "magenta"
-  faint: "gray"
-
-ui:
-  spinner_type: "MiniDot"
-  cursor_char: ">"
-```
-
-### Fun Theme
-
-```yaml
-colors:
-  info: "#6A5ACD"     # Slate Blue
-  success: "#32CD32"  # Lime Green
-  warning: "#FFA500"  # Orange
-  error: "#DC143C"    # Crimson
-  highlight: "#FF1493" # Deep Pink
-  faint: "#708090"    # Slate Gray
-
-ui:
-  spinner_type: "Monkey"
-  cursor_char: "♦"
-```
-
 ## Troubleshooting Configuration
 
 If TFApp encounters issues with your configuration:

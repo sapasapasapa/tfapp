@@ -34,7 +34,7 @@ func (a *ApplyManager) Apply(ctx interface{}, planFilePath string) error {
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response == "yes" {
-		if err := a.executor.RunCommand(ctx, []string{"apply", planFilePath}, "Applying terraform plan", true); err != nil {
+		if err := a.executor.RunCommand(ctx, []string{"apply", planFilePath}, "Applying terraform plan", false); err != nil {
 			return fmt.Errorf("error executing terraform apply: %w", err)
 		}
 		return nil
@@ -65,7 +65,7 @@ func (a *ApplyManager) ApplyTargets(ctx interface{}, targets []string) error {
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response == "yes" {
-		if err := a.executor.RunCommand(ctx, args, "Applying terraform to selected resources", true); err != nil {
+		if err := a.executor.RunCommand(ctx, args, "Applying terraform to selected resources", false); err != nil {
 			return fmt.Errorf("error executing targeted terraform apply: %w", err)
 		}
 		return nil

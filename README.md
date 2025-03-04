@@ -25,6 +25,17 @@ A delightful, feature-rich interface for Terraform that makes infrastructure man
 
 ### Installation Methods
 
+#### Using Homebrew (Recommended)
+
+```bash
+# Install via Homebrew (macOS and Linux)
+brew tap sapasapasapa/homebrew-tap
+brew install tfapp
+
+# Or in a single command
+brew install sapasapasapa/homebrew-tap/tfapp
+```
+
 #### Install from Binary
 
 ```bash
@@ -41,16 +52,30 @@ sudo mv tfapp /usr/local/bin/
 tfapp --version
 ```
 
-#### Using Homebrew
+#### Build from Source
 
-```bash
-# Install via Homebrew (macOS and Linux)
-brew tap sapasapasapa/homebrew-tap
-brew install tfapp
+Building from source gives you the latest code and the ability to customize the build.
 
-# Or in a single command
-brew install sapasapasapa/homebrew-tap/tfapp
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/tfapp.git
+   cd tfapp
+   ```
+
+2. Build the application:
+   ```bash
+   go build -o build/tfapp ./cmd/tfapp
+   ```
+
+3. (Optional) Install the binary to a location in your PATH:
+   ```bash
+   sudo cp build/tfapp /usr/local/bin/
+   ```
+
+4. Verify the installation:
+   ```bash
+   tfapp --version
+   ```
 
 ### Using TFApp
 
@@ -74,30 +99,6 @@ For detailed information, check our documentation:
 - [Advanced Features](docs/advanced.md) - Power user features and techniques
 - [Development](docs/development.md) - Contributing to TFApp
 
-## 🖼️ Screenshots
-
-<table>
-  <tr>
-    <td width="50%">
-      <img src="https://via.placeholder.com/400x300.png?text=Interactive+Menu" alt="Interactive Menu" />
-      <p align="center"><em>Interactive Menu</em></p>
-    </td>
-    <td width="50%">
-      <img src="https://via.placeholder.com/400x300.png?text=Resource+Selection" alt="Resource Selection" />
-      <p align="center"><em>Resource Selection</em></p>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%">
-      <img src="https://via.placeholder.com/400x300.png?text=Colorized+Output" alt="Colorized Output" />
-      <p align="center"><em>Colorized Output</em></p>
-    </td>
-    <td width="50%">
-      <img src="https://via.placeholder.com/400x300.png?text=Plan+Overview" alt="Plan Overview" />
-      <p align="center"><em>Plan Overview</em></p>
-    </td>
-  </tr>
-</table>
 
 ## 🔄 Version Compatibility
 
@@ -108,34 +109,6 @@ For detailed information, check our documentation:
 ## 👥 Contributing
 
 Contributions are welcome! Check out our [Development Guide](docs/development.md) to get started.
-
-## 🚀 Releasing
-
-TFApp uses [GoReleaser](https://goreleaser.com/) for building and publishing releases.
-
-### Creating a new release
-
-1. Tag a new version:
-```bash
-git tag -a v0.1.0 -m "First release"
-git push origin v0.1.0
-```
-
-2. GitHub Actions will automatically build and release to:
-   - GitHub Releases page
-   - Homebrew tap (sapasapasapa/homebrew-tap)
-
-### Local testing
-
-To test the release process locally without publishing:
-
-```bash
-# Install GoReleaser
-go install github.com/goreleaser/goreleaser@latest
-
-# Test build without publishing
-goreleaser release --snapshot --clean --skip=publish
-```
 
 ## 📜 License
 
