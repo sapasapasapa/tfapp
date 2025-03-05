@@ -7,6 +7,8 @@ import (
 
 	"tfapp/internal/ui"
 
+	"errors"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -32,6 +34,7 @@ type model struct {
 	cursor   int
 	selected *Option
 	quitting bool
+	choice   string
 }
 
 // Init implements tea.Model.
@@ -63,6 +66,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter", " ":
 			m.selected = &m.options[m.cursor]
+			m.choice = m.selected.Name
 			return m, tea.Quit
 		}
 	}
@@ -128,51 +132,19 @@ func (m model) View() string {
 	return s.String()
 }
 
-// Show displays a menu with the default options and returns the selected option.
+// Show displays the menu and returns the selected option.
 func Show() (string, error) {
-	options := []Option{
-		{
-			Name:        "Apply Plan",
-			Description: "Apply the plan to the selected targets",
-		},
-		{
-			Name:        "Show Full Plan",
-			Description: "Show the full plan",
-		},
-		{
-			Name:        "Do a target apply",
-			Description: "Apply the plan to the selected targets",
-		},
-		{
-			Name:        "Exit",
-			Description: "Exit the application",
-		},
-	}
-
-	m := model{
-		options: options,
-		cursor:  0,
-	}
-
-	// Initialize styles with latest config
-	m.updateStyles()
-
-	p := tea.NewProgram(m)
-
-	finalModel, err := p.Run()
+	p := tea.NewProgram(initialModel())
+	m, err := p.Run()
 	if err != nil {
 		return "", err
 	}
 
-	if finalModel.(model).quitting && finalModel.(model).selected == nil {
-		return "Exit", nil
+	if m, ok := m.(model); ok {
+		return m.choice, nil
 	}
 
-	if finalModel.(model).selected == nil {
-		return "", fmt.Errorf("no option selected")
-	}
-
-	return finalModel.(model).selected.Name, nil
+	return "", errors.New("could not get selected choice")
 }
 
 // ClearMenuOutput clears the menu output area from the terminal
@@ -187,14 +159,37 @@ func ClearMenuOutput() {
 	fmt.Printf("\033[%dA\033[J", menuHeight)
 }
 
-// initialModel creates the initial model for the menu.
-func initialModel(options []Option) model {
+// initialModel creates a new model for the menu.
+func initialModel() model {
+	choices := []string{
+		"Apply Plan",
+		"Show Full Plan",
+		"Do a target apply",
+		"Exit",
+	}
+
+	descriptions := []string{
+		"Apply the plan to your infrastructure",
+		"View the plan with collapsible resources",
+		"Apply specific resources from the plan",
+		"Exit without applying changes",
+	}
+
+	options := make([]Option, len(choices))
+	for i, choice := range choices {
+		options[i] = Option{
+			Name:        choice,
+			Description: descriptions[i],
+			Selected:    "",
+		}
+	}
+
 	mod := model{
 		options: options,
 		cursor:  0,
 	}
 
-	// Initialize styles
+	// Initialize styles with latest config
 	mod.updateStyles()
 
 	return mod

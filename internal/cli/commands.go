@@ -87,7 +87,7 @@ func (a *App) handleMenuSelection(ctx context.Context, planFile string, resource
 		menu.ClearMenuOutput()
 		return a.tfApply.Apply(ctx, planFile)
 	case "Show Full Plan":
-		menu.ClearMenuOutput()
+		utils.ClearTerminal()
 		err := a.tfPlan.ShowPlan(ctx, planFile)
 		if err != nil {
 			return err
