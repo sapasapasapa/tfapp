@@ -145,6 +145,8 @@ func (m model) View() string {
 				descStyle = updateStyle
 			case "destroy":
 				descStyle = destroyStyle
+			case "replace":
+				descStyle = destroyStyle
 			default:
 				descStyle = faintStyle
 			}
