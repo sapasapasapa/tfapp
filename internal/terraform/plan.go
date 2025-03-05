@@ -64,7 +64,7 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 		if strings.Contains(line, "# module.") {
 			action := getResourceAction(line)
 			// Clean up the name by removing leading # and whitespace
-			name := strings.TrimPrefix(strings.TrimSpace(strings.Split(line, " will be")[0]), "#")
+			name := strings.TrimPrefix(strings.TrimSpace(strings.Split(strings.Split(line, " will be")[0], " must be")[0]), "#")
 
 			resources = append(resources, models.Resource{
 				Name:   name,
@@ -109,6 +109,8 @@ func getResourceAction(line string) string {
 		return "destroy"
 	} else if strings.Contains(line, "will be updated in-place") {
 		return "update"
+	} else if strings.Contains(line, "must be replaced") {
+		return "replace"
 	}
 	return ""
 }
