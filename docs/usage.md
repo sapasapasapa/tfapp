@@ -91,9 +91,66 @@ While using TFApp's interactive components:
 - Press Space to toggle selection
 - Press Enter to confirm selections
 
+### Plan Viewer Navigation
+TFApp includes an interactive plan viewer with collapsible sections:
+
+- **Basic Navigation**
+  - Use arrow keys (↑/↓) or (j/k) to move up and down
+  - Press Home/g to jump to the top of the plan
+  - Press End/G to jump to the bottom of the plan
+
+- **Expanding/Collapsing Sections**
+  - Press Right arrow, l, Enter, or Space to expand a node
+  - Press Left arrow or h to collapse a node or jump to parent
+  - Press a to expand all nodes recursively
+  - Press n to collapse all nodes except root level
+
+- **Visual Indicators**
+  - Purple triangles (▶/▼) indicate expandable/collapsible sections
+  - A status bar at the bottom shows your current position and percentage
+  - Messages indicate if there's more content above or below
+
+- **Help System**
+  - Press ? at any time to view a complete list of navigation commands
+  - The help tooltip shows all available keyboard shortcuts
+  - Press ? again to hide the help overlay
+
 ### During Terraform Operations
 - Ctrl+C to interrupt operations
 - Standard Terraform prompts will appear for confirmation
+
+## Advanced Features
+
+### Responsive Plan Viewer
+
+The TFApp plan viewer automatically adapts to your terminal window size:
+
+- The viewer adjusts its height when you resize your terminal
+- Content is scrollable for plans of any size
+- The status bar always displays at the bottom of the window
+- All UI elements scale appropriately with the window size
+
+### Smart Node Collapsing
+
+When viewing complex plans, TFApp provides smart node management:
+
+- Expand a single node to see its immediate children
+- Expand all nodes recursively using the 'a' key
+- Collapse all nodes except root level with the 'n' key
+- When a node is already expanded, pressing Enter collapses all its children while keeping the node itself expanded
+  - This is useful for quickly clearing out nested content while maintaining your place in the hierarchy
+
+### Visual Feedback
+
+TFApp provides clear visual feedback during navigation:
+
+- Resources are automatically colorized based on action type:
+  - Green for creations
+  - Yellow for updates
+  - Red for deletions
+- The selected line is highlighted for easy tracking
+- The status bar shows your exact position and percentage through the document
+- Indicators tell you when there's more content above or below your current view
 
 ## Workflow Examples
 

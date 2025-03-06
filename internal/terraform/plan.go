@@ -9,6 +9,7 @@ import (
 
 	"tfapp/internal/models"
 	"tfapp/internal/ui"
+	"tfapp/internal/ui/plan"
 )
 
 // PlanManager handles Terraform plan operations.
@@ -97,8 +98,8 @@ func (p *PlanManager) ShowPlan(ctx interface{}, planFilePath string) error {
 		return fmt.Errorf("error showing plan: %w", err)
 	}
 
-	fmt.Println(string(output))
-	return nil
+	// Use the interactive plan viewer
+	return plan.Show(string(output))
 }
 
 // getResourceAction determines the action being performed on a resource from a plan line.

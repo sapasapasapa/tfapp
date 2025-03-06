@@ -13,6 +13,7 @@ A delightful, feature-rich interface for Terraform that makes infrastructure man
 - 🚀 **Interactive Interface** - Navigate infrastructure workflows with intuitive menus
 - 🎯 **Resource Targeting** - Select specific resources for targeted applies
 - 🌈 **Colorized Output** - Clear, color-coded information for better readability
+- 🔍 **Collapsible Plan View** - Toggle resource blocks and nested sections for better readability
 - ⚙️ **Customizable UI** - Personalize colors and UI elements to match your preferences
 
 ## 🚀 Quick Start
@@ -99,6 +100,27 @@ For detailed information, check our documentation:
 - [Advanced Features](docs/advanced.md) - Power user features and techniques
 - [Development](docs/development.md) - Contributing to TFApp
 
+## 📚 Features Explained
+
+### Interactive Menu Navigation
+
+Navigate through the application using intuitive keyboard shortcuts:
+- Up/Down arrows to move between options
+- Enter to select an option
+- Q to quit
+
+### Collapsible Plan View
+
+When viewing Terraform plans, you can now easily toggle resource blocks and nested sections:
+- Left/Right arrows or Enter/Space to expand/collapse sections
+- 'a' key to toggle expand/collapse all sections at once
+- Up/Down arrows to navigate through resources
+- 'g' or Home key to jump to the top
+- 'G' or End key to jump to the bottom
+- '?' to toggle help text
+- 'q' to quit the plan view and return to the menu
+
+This makes complex plans much easier to read and understand, especially when dealing with many changes.
 
 ## 🔄 Version Compatibility
 
