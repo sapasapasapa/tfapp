@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	apperrors "tfapp/internal/errors"
 	"tfapp/internal/models"
@@ -92,6 +94,7 @@ func (a *App) handleMenuSelection(ctx context.Context, planFile string, resource
 		if err != nil {
 			return err
 		}
+		printSummary(ctx, planFile)
 		return a.handleMenuSelection(ctx, planFile, resources, flags)
 	case "Do a target apply":
 		menu.ClearMenuOutput()
@@ -168,4 +171,58 @@ func createTempPlanFile() (string, error) {
 
 	// Create a temporary file path
 	return filepath.Join(tempDir, "terraform.tfplan"), nil
+}
+
+func printSummary(ctx context.Context, planFilePath string) ([]models.Resource, error) {
+	ctxTyped, ok := ctx.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("context type assertion failed")
+	}
+
+	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", "-no-color", planFilePath)
+	tfshow.Stderr = os.Stderr
+	output, err := tfshow.Output()
+	if err != nil {
+		return nil, fmt.Errorf("error showing plan: %w", err)
+	}
+
+	lines := strings.Split(string(output), "\n")
+	var resources []models.Resource
+
+	fmt.Println("Summary of proposed changes:")
+
+	for _, line := range lines {
+		if strings.Contains(line, "# module.") {
+			action := getResourceAction(line)
+			// Clean up the name by removing leading # and whitespace
+			name := strings.TrimPrefix(strings.TrimSpace(strings.Split(strings.Split(line, " will be")[0], " must be")[0]), "#")
+
+			resources = append(resources, models.Resource{
+				Name:   name,
+				Action: action,
+				Line:   line,
+			})
+
+			colorizedLine := ui.Colorize(line)
+			fmt.Println(colorizedLine)
+		} else if strings.Contains(line, "Plan:") {
+			fmt.Println(ui.Colorize(line))
+		}
+	}
+
+	return resources, nil
+}
+
+// getResourceAction determines the action type from a terraform plan line
+func getResourceAction(line string) string {
+	if strings.Contains(line, "will be created") {
+		return "create"
+	} else if strings.Contains(line, "will be destroyed") {
+		return "destroy"
+	} else if strings.Contains(line, "will be updated in-place") {
+		return "update"
+	} else if strings.Contains(line, "must be replaced") {
+		return "replace"
+	}
+	return "unknown"
 }
