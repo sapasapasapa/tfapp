@@ -450,7 +450,7 @@ func parsePlan(planOutput string) []*TreeNode {
 		trimmedLine := strings.TrimSpace(line)
 
 		// Check if this is a resource header line (with # prefix)
-		if strings.Contains(line, "# module.") {
+		if strings.Contains(line, "#") && (strings.Contains(line, "will be") || strings.Contains(line, "must be")) {
 
 			// Start a new resource node
 			resourceNode := &TreeNode{
