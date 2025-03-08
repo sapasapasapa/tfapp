@@ -363,9 +363,9 @@ func (m Model) View() string {
 		expandChar := "  "
 		if len(node.Children) > 0 && node.Toggleable {
 			if node.Expanded {
-				expandChar = ui.ColorInfo + "▼ " + ui.ColorReset
+				expandChar = ui.ColorInfo + "▼ " + ui.ColorForegroundReset
 			} else {
-				expandChar = ui.ColorHighlight + "▶ " + ui.ColorReset
+				expandChar = ui.ColorHighlight + "▶ " + ui.ColorForegroundReset
 			}
 		}
 
@@ -381,7 +381,7 @@ func (m Model) View() string {
 			// Add custom color for blocks (e.g., rule {})
 			if strings.Contains(line, "{") {
 				parts := strings.SplitN(line, "{", 2)
-				colorized = ui.ColorWarning + parts[0] + ui.ColorReset + "{"
+				colorized = ui.ColorWarning + parts[0] + ui.ColorForegroundReset + "{"
 				if len(parts) > 1 {
 					colorized += parts[1]
 				}
@@ -391,11 +391,11 @@ func (m Model) View() string {
 		} else {
 			// Handle attributes (+ and - changes)
 			if strings.HasPrefix(strings.TrimSpace(line), "+") {
-				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorReset, 1)
+				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
 			} else if strings.HasPrefix(strings.TrimSpace(line), "-") {
-				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorReset, 1)
+				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
 			} else if strings.HasPrefix(strings.TrimSpace(line), "~") {
-				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorReset, 1)
+				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
 			} else {
 				colorized = ui.Colorize(line)
 			}
@@ -426,8 +426,7 @@ func (m Model) View() string {
 
 	// Add status line at the bottom
 	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Background(lipgloss.Color(ui.GetHexColorByName("highlight"))).
+		Background(lipgloss.Color("#5300D1")).
 		Bold(true).
 		Width(100).
 		Padding(0, 1)
@@ -438,11 +437,11 @@ func (m Model) View() string {
 		// Everything fits on screen
 		if m.searchMode || m.inputSearchModel {
 			if m.searchMode && len(m.searchResults) > 0 {
-				statusMsg = fmt.Sprintf("All %d items visible - Search: %s (%d/%d matches)",
-					totalNodes, m.searchString, m.searchIndex+1, len(m.searchResults))
+				statusMsg = fmt.Sprintf("All %d items visible - Search: %s%s (%d/%d matches)%s",
+					totalNodes, m.searchString, ui.ColorSuccess, m.searchIndex+1, len(m.searchResults), ui.ColorForegroundReset)
 			} else if m.searchMode && len(m.searchResults) == 0 {
-				statusMsg = fmt.Sprintf("All %d items visible - Search: %s (No matches)",
-					totalNodes, m.searchString)
+				statusMsg = fmt.Sprintf("All %d items visible - Search: %s%s (No matches)%s",
+					totalNodes, ui.ColorError, m.searchString, ui.ColorForegroundReset)
 			} else if m.inputSearchModel {
 				// Show a cursor indicator in the search input
 				statusMsg = fmt.Sprintf("All %d items visible - Search: %s|", totalNodes, m.searchString)
@@ -456,11 +455,11 @@ func (m Model) View() string {
 		// Show percentage and position
 		if m.searchMode || m.inputSearchModel {
 			if m.searchMode && len(m.searchResults) > 0 {
-				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s (%d/%d matches)",
-					m.cursor+1, totalNodes, percentage, m.searchString, m.searchIndex+1, len(m.searchResults))
+				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s%s (%d/%d matches)%s",
+					m.cursor+1, totalNodes, percentage, ui.ColorSuccess, m.searchString, m.searchIndex+1, len(m.searchResults), ui.ColorForegroundReset)
 			} else if m.searchMode && len(m.searchResults) == 0 {
-				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s (No matches)",
-					m.cursor+1, totalNodes, percentage, m.searchString)
+				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s%s (No matches)%s",
+					m.cursor+1, totalNodes, percentage, ui.ColorError, m.searchString, ui.ColorForegroundReset)
 			} else if m.inputSearchModel {
 				// Show a cursor indicator in the search input
 				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s|",

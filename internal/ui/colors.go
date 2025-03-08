@@ -11,8 +11,9 @@ import (
 
 // Color constants for terminal output.
 const (
-	ColorReset = "\033[0m"
-	TextBold   = "\033[1m"
+	ColorReset           = "\033[0m"  // Reset all formatting (both foreground and background)
+	ColorForegroundReset = "\033[39m" // Reset only foreground color, preserving background
+	TextBold             = "\033[1m"
 )
 
 var (
@@ -122,37 +123,37 @@ func Colorize(line string) string {
 	// Handle specific operation patterns more precisely
 	// Destroy operations - red
 	if strings.Contains(line, "will be destroyed") {
-		return replaceIfContains(line, "will be destroyed", ColorError+"will be destroyed"+ColorReset)
+		return replaceIfContains(line, "will be destroyed", ColorError+"will be destroyed"+ColorForegroundReset)
 	} else if strings.Contains(line, "destroyed") {
-		line = replaceIfContains(line, "destroyed", ColorError+"destroyed"+ColorReset)
+		line = replaceIfContains(line, "destroyed", ColorError+"destroyed"+ColorForegroundReset)
 	}
 
 	// Replace/recreate operations - red
 	if strings.Contains(line, "must be replaced") {
-		return replaceIfContains(line, "must be replaced", ColorError+"must be replaced"+ColorReset)
+		return replaceIfContains(line, "must be replaced", ColorError+"must be replaced"+ColorForegroundReset)
 	} else if strings.Contains(line, "must be recreated") {
-		return replaceIfContains(line, "must be recreated", ColorError+"must be recreated"+ColorReset)
+		return replaceIfContains(line, "must be recreated", ColorError+"must be recreated"+ColorForegroundReset)
 	} else if strings.Contains(line, "replaced") {
-		line = replaceIfContains(line, "replaced", ColorError+"replaced"+ColorReset)
+		line = replaceIfContains(line, "replaced", ColorError+"replaced"+ColorForegroundReset)
 	}
 
 	// Create operations - green
 	if strings.Contains(line, "will be created") {
-		return replaceIfContains(line, "will be created", ColorSuccess+"will be created"+ColorReset)
+		return replaceIfContains(line, "will be created", ColorSuccess+"will be created"+ColorForegroundReset)
 	} else if strings.Contains(line, "created") {
-		line = replaceIfContains(line, "created", ColorSuccess+"created"+ColorReset)
+		line = replaceIfContains(line, "created", ColorSuccess+"created"+ColorForegroundReset)
 	}
 
 	// Update operations - yellow
 	if strings.Contains(line, "will be updated in-place") {
-		return replaceIfContains(line, "will be updated in-place", ColorWarning+"will be updated in-place"+ColorReset)
+		return replaceIfContains(line, "will be updated in-place", ColorWarning+"will be updated in-place"+ColorForegroundReset)
 	} else if strings.Contains(line, "updated in-place") {
-		line = replaceIfContains(line, "updated in-place", ColorWarning+"updated in-place"+ColorReset)
+		line = replaceIfContains(line, "updated in-place", ColorWarning+"updated in-place"+ColorForegroundReset)
 	}
 
 	// Read operations - blue
 	if strings.Contains(line, "will be read during apply") {
-		return replaceIfContains(line, "will be read during apply", ColorInfo+"will be read during apply"+ColorReset)
+		return replaceIfContains(line, "will be read during apply", ColorInfo+"will be read during apply"+ColorForegroundReset)
 	}
 
 	return line
@@ -175,7 +176,7 @@ func GetColorByName(name string) string {
 		case "error":
 			return ColorError
 		default:
-			return ColorReset
+			return ColorForegroundReset
 		}
 	}
 
@@ -193,7 +194,7 @@ func GetColorByName(name string) string {
 	case "faint":
 		return parseColorToAnsi(appConfig.Colors.Faint)
 	default:
-		return ColorReset
+		return ColorForegroundReset
 	}
 }
 
