@@ -119,10 +119,42 @@ func Colorize(line string) string {
 		return line
 	}
 
-	line = replaceIfContains(line, "destroyed", ColorError+"destroyed"+ColorReset)
-	line = replaceIfContains(line, "replaced", ColorError+"replaced"+ColorReset)
-	line = replaceIfContains(line, "created", ColorSuccess+"created"+ColorReset)
-	line = replaceIfContains(line, "updated in-place", ColorWarning+"updated in-place"+ColorReset)
+	// Handle specific operation patterns more precisely
+	// Destroy operations - red
+	if strings.Contains(line, "will be destroyed") {
+		return replaceIfContains(line, "will be destroyed", ColorError+"will be destroyed"+ColorReset)
+	} else if strings.Contains(line, "destroyed") {
+		line = replaceIfContains(line, "destroyed", ColorError+"destroyed"+ColorReset)
+	}
+
+	// Replace/recreate operations - red
+	if strings.Contains(line, "must be replaced") {
+		return replaceIfContains(line, "must be replaced", ColorError+"must be replaced"+ColorReset)
+	} else if strings.Contains(line, "must be recreated") {
+		return replaceIfContains(line, "must be recreated", ColorError+"must be recreated"+ColorReset)
+	} else if strings.Contains(line, "replaced") {
+		line = replaceIfContains(line, "replaced", ColorError+"replaced"+ColorReset)
+	}
+
+	// Create operations - green
+	if strings.Contains(line, "will be created") {
+		return replaceIfContains(line, "will be created", ColorSuccess+"will be created"+ColorReset)
+	} else if strings.Contains(line, "created") {
+		line = replaceIfContains(line, "created", ColorSuccess+"created"+ColorReset)
+	}
+
+	// Update operations - yellow
+	if strings.Contains(line, "will be updated in-place") {
+		return replaceIfContains(line, "will be updated in-place", ColorWarning+"will be updated in-place"+ColorReset)
+	} else if strings.Contains(line, "updated in-place") {
+		line = replaceIfContains(line, "updated in-place", ColorWarning+"updated in-place"+ColorReset)
+	}
+
+	// Read operations - blue
+	if strings.Contains(line, "will be read during apply") {
+		return replaceIfContains(line, "will be read during apply", ColorInfo+"will be read during apply"+ColorReset)
+	}
+
 	return line
 }
 

@@ -37,6 +37,8 @@ func (a *ApplyManager) Apply(ctx interface{}, planFilePath string) error {
 		if err := a.executor.RunCommand(ctx, []string{"apply", planFilePath}, "Applying terraform plan", false); err != nil {
 			return fmt.Errorf("error executing terraform apply: %w", err)
 		}
+		fmt.Printf("%s%sTerraform apply completed successfully!%s\n",
+			ui.ColorSuccess, ui.TextBold, ui.ColorReset)
 		return nil
 	}
 
@@ -68,6 +70,8 @@ func (a *ApplyManager) ApplyTargets(ctx interface{}, targets []string) error {
 		if err := a.executor.RunCommand(ctx, args, "Applying terraform to selected resources", false); err != nil {
 			return fmt.Errorf("error executing targeted terraform apply: %w", err)
 		}
+		fmt.Printf("%s%sTargeted terraform apply completed successfully!%s\n",
+			ui.ColorSuccess, ui.TextBold, ui.ColorReset)
 		return nil
 	}
 
