@@ -124,7 +124,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down", "j":
 			// Get visible nodes and check if we can move down
 			visibleNodes := getVisibleNodes(m.nodes)
-			if m.cursor < len(visibleNodes)-1 {
+			if m.cursor < len(visibleNodes)-2 {
 				m.cursor++
 				// Adjust window if needed
 				if m.cursor >= m.windowTop+m.windowHeight {
@@ -212,13 +212,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			// Collapse all nodes with children
 			for _, node := range m.allNodes {
-				if len(node.Children) > 0 && !node.IsRoot {
+				if len(node.Children) > 0 && (!node.IsRoot || !node.Parent.IsRoot) {
 					node.Expanded = false
 				}
 			}
 
 			// Refresh the list of all nodes
 			m.allNodes = flattenNodes(m.nodes)
+
+			// Set cursor to first line
+			m.cursor = 0
+			m.windowTop = 0
 
 		case "home", "g":
 			// Jump to the top of the plan
@@ -229,7 +233,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Jump to the bottom of the plan
 			visibleNodes := getVisibleNodes(m.nodes)
 			if len(visibleNodes) > 0 {
-				m.cursor = len(visibleNodes) - 1
+				m.cursor = len(visibleNodes) - 2
 				// Adjust window if needed
 				if m.cursor >= m.windowTop+m.windowHeight {
 					m.windowTop = m.cursor - m.windowHeight + 1
