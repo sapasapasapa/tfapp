@@ -62,7 +62,7 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "# module.") {
+		if strings.Contains(line, "#") && (strings.Contains(line, "will be") || strings.Contains(line, "must be")) {
 			action := getResourceAction(line)
 			// Clean up the name by removing leading # and whitespace
 			name := strings.TrimPrefix(strings.TrimSpace(strings.Split(strings.Split(line, " will be")[0], " must be")[0]), "#")
