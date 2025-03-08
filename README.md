@@ -12,8 +12,8 @@ A delightful, feature-rich interface for Terraform that makes infrastructure man
 
 - 🚀 **Interactive Interface** - Navigate infrastructure workflows with intuitive menus
 - 🎯 **Resource Targeting** - Select specific resources for targeted applies
-- 🌈 **Colorized Output** - Clear, color-coded information for better readability
 - 🔍 **Collapsible Plan View** - Toggle resource blocks and nested sections for better readability
+- 🌈 **Colorized Output** - Clear, color-coded information for better readability
 - ⚙️ **Customizable UI** - Personalize colors and UI elements to match your preferences
 
 ## 🚀 Quick Start
