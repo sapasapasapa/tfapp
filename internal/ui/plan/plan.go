@@ -690,7 +690,8 @@ func renderHelpTooltip() string {
 	}{
 		{"↑/k", "Move cursor up"},
 		{"↓/j", "Move cursor down"},
-		{"→/l/Enter/Space", "Expand current node"},
+		{"→/l/Space", "Expand current node"},
+		{"Enter", "Expand current node and all its children"},
 		{"←/h", "Collapse current node or jump to parent"},
 		{"a", "Expand all nodes"},
 		{"n", "Collapse all nodes except root level"},
