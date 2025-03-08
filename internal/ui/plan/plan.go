@@ -13,13 +13,14 @@ import (
 
 // TreeNode represents a node in the plan's resource tree.
 type TreeNode struct {
-	Text     string      // The text content of this node
-	Children []*TreeNode // Child nodes (nested blocks)
-	Parent   *TreeNode   // Parent node (nil for root)
-	Depth    int         // Depth in the tree
-	Expanded bool        // Whether this node is expanded
-	Type     string      // Type of node (resource, block, attribute)
-	IsRoot   bool        // Whether this is a root node
+	Text       string      // The text content of this node
+	Children   []*TreeNode // Child nodes (nested blocks)
+	Parent     *TreeNode   // Parent node (nil for root)
+	Depth      int         // Depth in the tree
+	Expanded   bool        // Whether this node is expanded
+	Type       string      // Type of node (resource, block, attribute)
+	IsRoot     bool        // Whether this is a root node
+	Toggleable bool        // Whether this node can be expanded/collapsed
 }
 
 // Model represents the state of the plan viewer.
@@ -136,7 +137,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			visibleNodes := getVisibleNodes(m.nodes)
 			if m.cursor >= 0 && m.cursor < len(visibleNodes) {
 				currentNode := visibleNodes[m.cursor]
-				if len(currentNode.Children) > 0 {
+				if len(currentNode.Children) > 0 && currentNode.Toggleable {
 					// Toggle the expansion state
 					currentNode.Expanded = !currentNode.Expanded
 					// Refresh the list of visible nodes
@@ -161,7 +162,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			visibleNodes := getVisibleNodes(m.nodes)
 			if m.cursor >= 0 && m.cursor < len(visibleNodes) {
 				currentNode := visibleNodes[m.cursor]
-				if len(currentNode.Children) > 0 {
+				if len(currentNode.Children) > 0 && currentNode.Toggleable {
 					if currentNode.Expanded {
 						// Collapse all children while keeping the current node expanded
 						collapseAllNodes(currentNode)
@@ -298,7 +299,7 @@ func (m Model) View() string {
 
 		// Show expansion indicator if this node has children
 		expandChar := "  "
-		if len(node.Children) > 0 {
+		if len(node.Children) > 0 && node.Toggleable {
 			if node.Expanded {
 				expandChar = ui.ColorInfo + "▼ " + ui.ColorReset
 			} else {
@@ -424,9 +425,10 @@ func parsePlan(planOutput string) []*TreeNode {
 
 	// Root node for the entire plan
 	root := &TreeNode{
-		Text:     "Terraform Plan",
-		Expanded: true,
-		IsRoot:   true,
+		Text:       "Terraform Plan",
+		Expanded:   true,
+		IsRoot:     true,
+		Toggleable: true,
 	}
 
 	// Create a stack for tracking the current path in the tree
@@ -435,37 +437,56 @@ func parsePlan(planOutput string) []*TreeNode {
 	// Parse the plan output line by line
 	var currentResourceNode *TreeNode
 	var blockLevel int
+	var inResourceBlock bool
 
-	for _, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 
 		// Calculate the indentation level
 		indent := len(line) - len(strings.TrimLeft(line, " "))
+		trimmedLine := strings.TrimSpace(line)
 
-		// Check if this is a resource line
-		if strings.Contains(line, "# ") && (strings.Contains(line, " will be created") ||
-			strings.Contains(line, " will be destroyed") ||
-			strings.Contains(line, " will be updated in-place") ||
-			strings.Contains(line, " must be replaced") ||
-			strings.Contains(line, " must be recreated") ||
-			strings.Contains(line, " will be read during apply")) {
+		// Check if this is a resource header line (with # prefix)
+		if strings.Contains(line, "# module.") {
 
 			// Start a new resource node
 			resourceNode := &TreeNode{
-				Text:     strings.TrimSpace(line),
-				Expanded: true, // Resources are expanded by default
-				Type:     "resource",
-				Depth:    indent / 2,
-				Parent:   root,
+				Text:       strings.TrimSpace(line),
+				Expanded:   true, // Resources are expanded by default
+				Type:       "resource",
+				Depth:      indent / 2,
+				Parent:     root,
+				Toggleable: false, // Resource headers should not be toggleable
+			}
+
+			// Check if the next line is a continuation (reason for destruction)
+			if i+1 < len(lines) &&
+				strings.Contains(line, " will be destroyed") &&
+				strings.TrimSpace(lines[i+1]) != "" &&
+				strings.Contains(lines[i+1], "# (because") {
+				// Add the reason to the current node text
+				resourceNode.Text += "\n" + strings.TrimSpace(lines[i+1])
+				i++ // Skip the next line since we've incorporated it
 			}
 
 			root.Children = append(root.Children, resourceNode)
 			currentResourceNode = resourceNode
 			stack = []*TreeNode{root, currentResourceNode}
 			blockLevel = 0
+			inResourceBlock = false
 			continue
+		}
+
+		// Check if this is the start of resource definition block (format: "- resource "type" "name" {")
+		if currentResourceNode != nil && !inResourceBlock &&
+			(strings.HasPrefix(trimmedLine, "- resource ") ||
+				strings.HasPrefix(trimmedLine, "+ resource ") ||
+				strings.HasPrefix(trimmedLine, "~ resource ")) &&
+			strings.Contains(trimmedLine, "{") {
+			inResourceBlock = true
 		}
 
 		// Skip processing if we haven't found a resource yet
@@ -492,10 +513,11 @@ func parsePlan(planOutput string) []*TreeNode {
 
 		// Create the node
 		node := &TreeNode{
-			Text:     strings.TrimSpace(line),
-			Expanded: false, // Blocks are collapsed by default
-			Type:     nodeType,
-			Depth:    depth,
+			Text:       strings.TrimSpace(line),
+			Expanded:   false, // Blocks are collapsed by default
+			Type:       nodeType,
+			Depth:      depth,
+			Toggleable: true, // Regular nodes are toggleable by default
 		}
 
 		// Find the appropriate parent based on indentation
