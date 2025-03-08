@@ -137,6 +137,17 @@ func (a *App) handleTargetApply(ctx context.Context, resources []models.Resource
 	}
 
 	utils.ClearTerminal()
+
+	// Filter out any existing -target flags
+	filteredFlags := make([]string, 0)
+	for _, flag := range flags.AdditionalFlags {
+		if !strings.HasPrefix(flag, "-target=") {
+			filteredFlags = append(filteredFlags, flag)
+		}
+	}
+	flags.AdditionalFlags = filteredFlags
+
+	// Add new target flags
 	for _, opt := range selectedOptions {
 		flags.AdditionalFlags = append(flags.AdditionalFlags, "-target="+opt.Name)
 	}
