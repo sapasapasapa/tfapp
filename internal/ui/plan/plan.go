@@ -370,7 +370,33 @@ func (m Model) View() string {
 		}
 
 		// Style the line based on node type
-		line := indent + expandChar + node.Text
+		var line string
+		if m.searchMode && m.searchString != "" {
+			// Highlight search matches
+			nodeText := node.Text
+			if strings.Contains(nodeText, m.searchString) {
+				// Split the text by the search string to highlight matches
+				parts := strings.Split(nodeText, m.searchString)
+				highlightedText := parts[0]
+				for j := 1; j < len(parts); j++ {
+					if m.cursor == i {
+						// Replace the simple color highlight with lipgloss styling for both foreground and background
+						searchMatchStyle := lipgloss.NewStyle().
+							Foreground(lipgloss.Color(ui.GetHexColorByName("success"))).
+							Background(lipgloss.Color("#333333")).
+							Bold(true)
+						highlightedText += searchMatchStyle.Render(m.searchString) + parts[j]
+					} else {
+						highlightedText += ui.ColorHighlight + m.searchString + ui.ColorForegroundReset + parts[j]
+					}
+				}
+				line = indent + expandChar + highlightedText
+			} else {
+				line = indent + expandChar + nodeText
+			}
+		} else {
+			line = indent + expandChar + node.Text
+		}
 
 		// Apply custom colorization based on node type
 		var colorized string
@@ -432,47 +458,32 @@ func (m Model) View() string {
 		Padding(0, 1)
 
 	// Create the status message with navigation info
-	var statusMsg string
+	var statusMsg string = ""
 	if totalNodes <= contentHeight {
-		// Everything fits on screen
-		if m.searchMode || m.inputSearchModel {
-			if m.searchMode && len(m.searchResults) > 0 {
-				statusMsg = fmt.Sprintf("All %d items visible - Search: %s%s (%d/%d matches)%s",
-					totalNodes, m.searchString, ui.ColorSuccess, m.searchIndex+1, len(m.searchResults), ui.ColorForegroundReset)
-			} else if m.searchMode && len(m.searchResults) == 0 {
-				statusMsg = fmt.Sprintf("All %d items visible - Search: %s%s (No matches)%s",
-					totalNodes, ui.ColorError, m.searchString, ui.ColorForegroundReset)
-			} else if m.inputSearchModel {
-				// Show a cursor indicator in the search input
-				statusMsg = fmt.Sprintf("All %d items visible - Search: %s|", totalNodes, m.searchString)
-			} else {
-				statusMsg = fmt.Sprintf("All %d items visible - Search: %s", totalNodes, m.searchString)
-			}
+		statusMsg += "All items visible"
+	} else {
+		statusMsg += fmt.Sprintf("Line %d of %d (%d%%)",
+			m.cursor+1, totalNodes, percentage)
+	}
+
+	if m.searchMode || m.inputSearchModel {
+		if m.searchMode && len(m.searchResults) > 0 {
+			statusMsg += fmt.Sprintf(" - Search: %s%s (%d/%d matches)%s",
+				ui.ColorSuccess, m.searchString, m.searchIndex+1, len(m.searchResults), ui.ColorForegroundReset)
+		} else if m.searchMode && len(m.searchResults) == 0 {
+			statusMsg += fmt.Sprintf(" - Search: %s%s (No matches)%s",
+				ui.ColorError, m.searchString, ui.ColorForegroundReset)
+		} else if m.inputSearchModel {
+			// Show a cursor indicator in the search input
+			statusMsg += fmt.Sprintf(" - Search: %s|", m.searchString)
 		} else {
-			statusMsg = fmt.Sprintf("All %d items visible - Press ? for help", totalNodes)
+			statusMsg += fmt.Sprintf(" - Search: %s", m.searchString)
 		}
 	} else {
-		// Show percentage and position
-		if m.searchMode || m.inputSearchModel {
-			if m.searchMode && len(m.searchResults) > 0 {
-				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s%s (%d/%d matches)%s",
-					m.cursor+1, totalNodes, percentage, ui.ColorSuccess, m.searchString, m.searchIndex+1, len(m.searchResults), ui.ColorForegroundReset)
-			} else if m.searchMode && len(m.searchResults) == 0 {
-				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s%s (No matches)%s",
-					m.cursor+1, totalNodes, percentage, ui.ColorError, m.searchString, ui.ColorForegroundReset)
-			} else if m.inputSearchModel {
-				// Show a cursor indicator in the search input
-				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s|",
-					m.cursor+1, totalNodes, percentage, m.searchString)
-			} else {
-				statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Search: %s",
-					m.cursor+1, totalNodes, percentage, m.searchString)
-			}
-		} else {
-			statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Press ? for help",
-				m.cursor+1, totalNodes, percentage)
-		}
+		statusMsg += " - Press ? for help"
+	}
 
+	if totalNodes > contentHeight {
 		// Add hint about content above/below if applicable
 		if start > 0 && contentEnd < totalNodes {
 			statusMsg += " - More content above and below"
