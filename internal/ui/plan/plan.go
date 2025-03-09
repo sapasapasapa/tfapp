@@ -138,8 +138,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.cursor < len(visibleNodes)-2 {
 					m.cursor++
 					// Adjust window if needed
-					if m.cursor >= m.windowTop+m.windowHeight {
-						m.windowTop = m.cursor - m.windowHeight + 1
+					if m.cursor >= m.windowTop+m.windowHeight-1 {
+						m.windowTop = m.cursor - m.windowHeight + 2
 					}
 				}
 
