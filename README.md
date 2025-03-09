@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/badge/Go-1.24-blue.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.2.5-orange.svg)](https://github.com/yourusername/tfapp/releases)
+[![Version](https://img.shields.io/badge/Version-0.2.6-orange.svg)](https://github.com/yourusername/tfapp/releases)
 
 A delightful, feature-rich interface for Terraform that makes infrastructure management more intuitive and efficient.
 
@@ -13,6 +13,7 @@ A delightful, feature-rich interface for Terraform that makes infrastructure man
 - 🚀 **Interactive Interface** - Navigate infrastructure workflows with intuitive menus
 - 🎯 **Resource Targeting** - Select specific resources for targeted applies
 - 🔍 **Collapsible Plan View** - Toggle resource blocks and nested sections for better readability
+- 🔬 **Full-text Search** - Search within plan output to quickly find specific resources or changes
 - 🌈 **Colorized Output** - Clear, color-coded information for better readability
 - ⚙️ **Customizable UI** - Personalize colors and UI elements to match your preferences
 
@@ -112,11 +113,16 @@ Navigate through the application using intuitive keyboard shortcuts:
 ### Collapsible Plan View
 
 When viewing Terraform plans, you can now easily toggle resource blocks and nested sections:
-- Left/Right arrows or Enter/Space to expand/collapse sections
-- 'a' key to toggle expand/collapse all sections at once
-- Up/Down arrows to navigate through resources
+- Space/Left/Right to expand/collapse sections
+- 'a' key to expand all sections at once
+- 'A' key to collapse all sections at once
+- 'j'/'k'/Up/Down to navigate through resources
 - 'g' or Home key to jump to the top
 - 'G' or End key to jump to the bottom
+- '/' to enter search mode and search within the plan
+- 'n' to find the next search match
+- 'N' to find the previous search match
+- 'Esc' to exit search mode
 - '?' to toggle help text
 - 'q' to quit the plan view and return to the menu
 

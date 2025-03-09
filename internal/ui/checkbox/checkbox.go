@@ -278,8 +278,7 @@ func (m model) View() string {
 
 	// Add status line at the bottom
 	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Background(lipgloss.Color(ui.GetHexColorByName("highlight"))).
+		Background(lipgloss.Color("#5300D1")).
 		Bold(true).
 		Width(100).
 		Padding(0, 1)

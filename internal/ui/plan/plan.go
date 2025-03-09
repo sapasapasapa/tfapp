@@ -25,14 +25,19 @@ type TreeNode struct {
 
 // Model represents the state of the plan viewer.
 type Model struct {
-	nodes        []*TreeNode // All root-level nodes
-	allNodes     []*TreeNode // All nodes (flattened)
-	cursor       int         // Current cursor position
-	windowTop    int         // The top line of the window being displayed
-	windowHeight int         // Height of visible window
-	quitting     bool        // Whether the user is quitting
-	ready        bool        // Whether we've received the window size yet
-	showHelp     bool        // Whether to show the help tooltip
+	nodes            []*TreeNode // All root-level nodes
+	allNodes         []*TreeNode // All nodes (flattened)
+	cursor           int         // Current cursor position
+	windowTop        int         // The top line of the window being displayed
+	windowHeight     int         // Height of visible window
+	quitting         bool        // Whether the user is quitting
+	ready            bool        // Whether we've received the window size yet
+	showHelp         bool        // Whether to show the help tooltip
+	inputSearchModel bool        // Waiting user to insert search string
+	searchMode       bool        // Whether to show the search results
+	searchString     string      // The search string
+	searchResults    []int       // The search results
+	searchIndex      int         // The index of the search result
 }
 
 // New creates a new plan viewer model.
@@ -50,14 +55,19 @@ func New(planOutput string) Model {
 	allNodes := flattenNodes(nodes)
 
 	return Model{
-		nodes:        nodes,
-		allNodes:     allNodes,
-		cursor:       0,
-		windowTop:    0,
-		windowHeight: 25, // Show approximately 25 lines at a time for better visibility
-		quitting:     false,
-		ready:        false,
-		showHelp:     false,
+		nodes:            nodes,
+		allNodes:         allNodes,
+		cursor:           0,
+		windowTop:        0,
+		windowHeight:     25, // Show approximately 25 lines at a time for better visibility
+		quitting:         false,
+		ready:            false,
+		showHelp:         false,
+		inputSearchModel: false,
+		searchMode:       false,
+		searchString:     "",
+		searchResults:    []int{},
+		searchIndex:      0,
 	}
 }
 
@@ -102,141 +112,193 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "b", "ctrl+c":
-			m.quitting = true
-			return m, tea.Quit
+		if !m.searchMode && !m.inputSearchModel {
+			switch msg.String() {
+			case "q", "b", "ctrl+c":
+				m.quitting = true
+				return m, tea.Quit
 
-		case "?":
-			// Toggle help tooltip
-			m.showHelp = !m.showHelp
+			case "?":
+				// Toggle help tooltip
+				m.showHelp = !m.showHelp
 
-		case "up", "k":
-			// Get visible nodes and check if we can move up
-			if m.cursor > 0 {
-				m.cursor--
-				// Adjust window if needed
-				if m.cursor < m.windowTop {
-					m.windowTop = m.cursor
+			case "up", "k":
+				// Get visible nodes and check if we can move up
+				if m.cursor > 0 {
+					m.cursor--
+					// Adjust window if needed
+					if m.cursor < m.windowTop {
+						m.windowTop = m.cursor
+					}
 				}
-			}
 
-		case "down", "j":
-			// Get visible nodes and check if we can move down
-			visibleNodes := getVisibleNodes(m.nodes)
-			if m.cursor < len(visibleNodes)-1 {
-				m.cursor++
-				// Adjust window if needed
-				if m.cursor >= m.windowTop+m.windowHeight {
-					m.windowTop = m.cursor - m.windowHeight + 1
+			case "down", "j":
+				// Get visible nodes and check if we can move down
+				visibleNodes := getVisibleNodes(m.nodes)
+				if m.cursor < len(visibleNodes)-2 {
+					m.cursor++
+					// Adjust window if needed
+					if m.cursor >= m.windowTop+m.windowHeight {
+						m.windowTop = m.cursor - m.windowHeight + 1
+					}
 				}
-			}
 
-		case "right", "l", " ":
-			// Toggle expansion of the current node
-			visibleNodes := getVisibleNodes(m.nodes)
-			if m.cursor >= 0 && m.cursor < len(visibleNodes) {
-				currentNode := visibleNodes[m.cursor]
-				if len(currentNode.Children) > 0 && currentNode.Toggleable {
-					// Toggle the expansion state
-					currentNode.Expanded = !currentNode.Expanded
-					// Refresh the list of visible nodes
-					m.allNodes = flattenNodes(m.nodes)
+			case "right", "l", " ":
+				// Toggle expansion of the current node
+				visibleNodes := getVisibleNodes(m.nodes)
+				if m.cursor >= 0 && m.cursor < len(visibleNodes) {
+					currentNode := visibleNodes[m.cursor]
+					if len(currentNode.Children) > 0 && currentNode.Toggleable {
+						// Toggle the expansion state
+						currentNode.Expanded = !currentNode.Expanded
+						// Refresh the list of visible nodes
+						m.allNodes = flattenNodes(m.nodes)
 
-					// Adjust cursor if it's now beyond the visible nodes
-					newVisibleNodes := getVisibleNodes(m.nodes)
-					if m.cursor >= len(newVisibleNodes) {
-						m.cursor = len(newVisibleNodes) - 1
-						if m.cursor < 0 {
-							m.cursor = 0
+						// Adjust cursor if it's now beyond the visible nodes
+						newVisibleNodes := getVisibleNodes(m.nodes)
+						if m.cursor >= len(newVisibleNodes) {
+							m.cursor = len(newVisibleNodes) - 1
+							if m.cursor < 0 {
+								m.cursor = 0
+							}
+						}
+
+						// Ensure cursor is in view
+						ensureCursorVisible(&m)
+					}
+				}
+
+			case "enter":
+				// Toggle expansion of the current node
+				visibleNodes := getVisibleNodes(m.nodes)
+				if m.cursor >= 0 && m.cursor < len(visibleNodes) {
+					currentNode := visibleNodes[m.cursor]
+					if len(currentNode.Children) > 0 && currentNode.Toggleable {
+						if currentNode.Expanded {
+							// Collapse all children while keeping the current node expanded
+							collapseAllNodes(currentNode)
+							// No need to set currentNode.Expanded = true since we don't change it now
+						} else {
+							expandAllNodes(currentNode)
 						}
 					}
+
+					// Refresh the list of all nodes
+					m.allNodes = flattenNodes(m.nodes)
 
 					// Ensure cursor is in view
 					ensureCursorVisible(&m)
 				}
-			}
 
-		case "enter":
-			// Toggle expansion of the current node
-			visibleNodes := getVisibleNodes(m.nodes)
-			if m.cursor >= 0 && m.cursor < len(visibleNodes) {
-				currentNode := visibleNodes[m.cursor]
-				if len(currentNode.Children) > 0 && currentNode.Toggleable {
-					if currentNode.Expanded {
-						// Collapse all children while keeping the current node expanded
-						collapseAllNodes(currentNode)
-						// No need to set currentNode.Expanded = true since we don't change it now
-					} else {
-						expandAllNodes(currentNode)
+			case "left", "h":
+				// Collapse current node or move to parent
+				visibleNodes := getVisibleNodes(m.nodes)
+				if m.cursor >= 0 && m.cursor < len(visibleNodes) {
+					currentNode := visibleNodes[m.cursor]
+					if currentNode.Expanded && len(currentNode.Children) > 0 {
+						// Collapse this node
+						currentNode.Expanded = false
+						// Refresh the list of visible nodes
+						m.allNodes = flattenNodes(m.nodes)
+					} else if currentNode.Parent != nil {
+						// Find parent in visible nodes
+						for i, node := range visibleNodes {
+							if node == currentNode.Parent {
+								m.cursor = i
+								break
+							}
+						}
+					}
+				}
+
+			case "a":
+				// Expand all nodes recursively
+				for _, rootNode := range m.nodes {
+					expandAllNodes(rootNode)
+				}
+
+				// Refresh the list of all nodes
+				m.allNodes = flattenNodes(m.nodes)
+
+			case "A":
+				// Collapse all nodes with children
+				for _, node := range m.allNodes {
+					if len(node.Children) > 0 && (!node.IsRoot || !node.Parent.IsRoot) {
+						node.Expanded = false
 					}
 				}
 
 				// Refresh the list of all nodes
 				m.allNodes = flattenNodes(m.nodes)
 
-				// Ensure cursor is in view
-				ensureCursorVisible(&m)
-			}
+				// Set cursor to first line
+				m.cursor = 0
+				m.windowTop = 0
 
-		case "left", "h":
-			// Collapse current node or move to parent
-			visibleNodes := getVisibleNodes(m.nodes)
-			if m.cursor >= 0 && m.cursor < len(visibleNodes) {
-				currentNode := visibleNodes[m.cursor]
-				if currentNode.Expanded && len(currentNode.Children) > 0 {
-					// Collapse this node
-					currentNode.Expanded = false
-					// Refresh the list of visible nodes
-					m.allNodes = flattenNodes(m.nodes)
-				} else if currentNode.Parent != nil {
-					// Find parent in visible nodes
-					for i, node := range visibleNodes {
-						if node == currentNode.Parent {
-							m.cursor = i
-							break
+			case "home", "g":
+				// Jump to the top of the plan
+				m.cursor = 0
+				m.windowTop = 0
+
+			case "end", "G":
+				// Jump to the bottom of the plan
+				visibleNodes := getVisibleNodes(m.nodes)
+				if len(visibleNodes) > 0 {
+					m.cursor = len(visibleNodes) - 1
+					// Adjust window if needed
+					if m.cursor >= m.windowTop+m.windowHeight {
+						m.windowTop = m.cursor - m.windowHeight + 1
+						if m.windowTop < 0 {
+							m.windowTop = 0
 						}
 					}
+					m.cursor -= 1
 				}
+			case "/":
+				// Search for a resource by name
+				m.inputSearchModel = true
 			}
-
-		case "a":
-			// Expand all nodes recursively
-			for _, rootNode := range m.nodes {
-				expandAllNodes(rootNode)
-			}
-
-			// Refresh the list of all nodes
-			m.allNodes = flattenNodes(m.nodes)
-
-		case "n":
-			// Collapse all nodes with children
-			for _, node := range m.allNodes {
-				if len(node.Children) > 0 && !node.IsRoot {
-					node.Expanded = false
-				}
-			}
-
-			// Refresh the list of all nodes
-			m.allNodes = flattenNodes(m.nodes)
-
-		case "home", "g":
-			// Jump to the top of the plan
-			m.cursor = 0
-			m.windowTop = 0
-
-		case "end", "G":
-			// Jump to the bottom of the plan
-			visibleNodes := getVisibleNodes(m.nodes)
-			if len(visibleNodes) > 0 {
-				m.cursor = len(visibleNodes) - 1
-				// Adjust window if needed
-				if m.cursor >= m.windowTop+m.windowHeight {
-					m.windowTop = m.cursor - m.windowHeight + 1
-					if m.windowTop < 0 {
-						m.windowTop = 0
+		} else if m.inputSearchModel {
+			switch msg.String() {
+			case "enter":
+				if len(m.searchString) > 0 {
+					m.searchMode = true
+					m.inputSearchModel = false
+					m.searchResults = m.getSearchResults()
+					if len(m.searchResults) > 0 {
+						m.searchIndex = 0
+						m.cursor = m.searchResults[m.searchIndex]
+						ensureCursorVisible(&m)
 					}
+				} else {
+					// If search string is empty, exit search mode
+					m.searchString = ""
+					m.inputSearchModel = false
 				}
+			case "esc", "ctrl+c":
+				m.searchMode = false
+				m.inputSearchModel = false
+				m.searchString = ""
+			case "backspace":
+				// Handle backspace for search string
+				if len(m.searchString) > 0 {
+					m.searchString = m.searchString[:len(m.searchString)-1]
+				}
+			default:
+				// Only add printable characters to the search string
+				if len(msg.String()) > 0 {
+					m.searchString += msg.String()
+				}
+			}
+		} else if m.searchMode {
+			switch msg.String() {
+			case "n":
+				m.findNext(1)
+			case "N":
+				m.findNext(-1)
+			default:
+				m.searchMode = false
+				m.searchString = ""
 			}
 		}
 	}
@@ -301,14 +363,40 @@ func (m Model) View() string {
 		expandChar := "  "
 		if len(node.Children) > 0 && node.Toggleable {
 			if node.Expanded {
-				expandChar = ui.ColorInfo + "▼ " + ui.ColorReset
+				expandChar = ui.ColorInfo + "▼ " + ui.ColorForegroundReset
 			} else {
-				expandChar = ui.ColorHighlight + "▶ " + ui.ColorReset
+				expandChar = ui.ColorHighlight + "▶ " + ui.ColorForegroundReset
 			}
 		}
 
 		// Style the line based on node type
-		line := indent + expandChar + node.Text
+		var line string
+		if m.searchMode && m.searchString != "" {
+			// Highlight search matches
+			nodeText := node.Text
+			if strings.Contains(nodeText, m.searchString) {
+				// Split the text by the search string to highlight matches
+				parts := strings.Split(nodeText, m.searchString)
+				highlightedText := parts[0]
+				for j := 1; j < len(parts); j++ {
+					if m.cursor == i {
+						// Replace the simple color highlight with lipgloss styling for both foreground and background
+						searchMatchStyle := lipgloss.NewStyle().
+							Foreground(lipgloss.Color(ui.GetHexColorByName("success"))).
+							Background(lipgloss.Color("#333333")).
+							Bold(true)
+						highlightedText += searchMatchStyle.Render(m.searchString) + parts[j]
+					} else {
+						highlightedText += ui.ColorHighlight + m.searchString + ui.ColorForegroundReset + parts[j]
+					}
+				}
+				line = indent + expandChar + highlightedText
+			} else {
+				line = indent + expandChar + nodeText
+			}
+		} else {
+			line = indent + expandChar + node.Text
+		}
 
 		// Apply custom colorization based on node type
 		var colorized string
@@ -319,7 +407,7 @@ func (m Model) View() string {
 			// Add custom color for blocks (e.g., rule {})
 			if strings.Contains(line, "{") {
 				parts := strings.SplitN(line, "{", 2)
-				colorized = ui.ColorWarning + parts[0] + ui.ColorReset + "{"
+				colorized = ui.ColorWarning + parts[0] + ui.ColorForegroundReset + "{"
 				if len(parts) > 1 {
 					colorized += parts[1]
 				}
@@ -329,11 +417,11 @@ func (m Model) View() string {
 		} else {
 			// Handle attributes (+ and - changes)
 			if strings.HasPrefix(strings.TrimSpace(line), "+") {
-				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorReset, 1)
+				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
 			} else if strings.HasPrefix(strings.TrimSpace(line), "-") {
-				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorReset, 1)
+				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
 			} else if strings.HasPrefix(strings.TrimSpace(line), "~") {
-				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorReset, 1)
+				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
 			} else {
 				colorized = ui.Colorize(line)
 			}
@@ -364,22 +452,38 @@ func (m Model) View() string {
 
 	// Add status line at the bottom
 	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CCCCCC")).
-		Background(lipgloss.Color(ui.GetHexColorByName("highlight"))).
+		Background(lipgloss.Color("#5300D1")).
 		Bold(true).
 		Width(100).
 		Padding(0, 1)
 
 	// Create the status message with navigation info
-	var statusMsg string
+	var statusMsg string = ""
 	if totalNodes <= contentHeight {
-		// Everything fits on screen
-		statusMsg = fmt.Sprintf("All %d items visible - Press ? for help", totalNodes)
+		statusMsg += "All items visible"
 	} else {
-		// Show percentage and position
-		statusMsg = fmt.Sprintf("Line %d of %d (%d%%) - Press ? for help",
+		statusMsg += fmt.Sprintf("Line %d of %d (%d%%)",
 			m.cursor+1, totalNodes, percentage)
+	}
 
+	if m.searchMode || m.inputSearchModel {
+		if m.searchMode && len(m.searchResults) > 0 {
+			statusMsg += fmt.Sprintf(" - Search: %s%s (%d/%d matches)%s",
+				ui.ColorSuccess, m.searchString, m.searchIndex+1, len(m.searchResults), ui.ColorForegroundReset)
+		} else if m.searchMode && len(m.searchResults) == 0 {
+			statusMsg += fmt.Sprintf(" - Search: %s%s (No matches)%s",
+				ui.ColorError, m.searchString, ui.ColorForegroundReset)
+		} else if m.inputSearchModel {
+			// Show a cursor indicator in the search input
+			statusMsg += fmt.Sprintf(" - Search: %s|", m.searchString)
+		} else {
+			statusMsg += fmt.Sprintf(" - Search: %s", m.searchString)
+		}
+	} else {
+		statusMsg += " - Press ? for help"
+	}
+
+	if totalNodes > contentHeight {
 		// Add hint about content above/below if applicable
 		if start > 0 && contentEnd < totalNodes {
 			statusMsg += " - More content above and below"
@@ -554,7 +658,6 @@ func flattenNodes(nodes []*TreeNode) []*TreeNode {
 	return result
 }
 
-// getVisibleNodes returns only the nodes that should be visible based on expansion state.
 func getVisibleNodes(nodes []*TreeNode) []*TreeNode {
 	var result []*TreeNode
 
@@ -568,49 +671,6 @@ func getVisibleNodes(nodes []*TreeNode) []*TreeNode {
 	return result
 }
 
-// isNodeVisible determines if a node should be visible based on its parents' expansion state.
-func isNodeVisible(node *TreeNode) bool {
-	if node.IsRoot || node.Parent == nil {
-		return true
-	}
-
-	// Check if all ancestors are expanded
-	parent := node.Parent
-	for parent != nil && !parent.IsRoot {
-		if !parent.Expanded {
-			return false
-		}
-		parent = parent.Parent
-	}
-
-	return true
-}
-
-// getVisibleNodeAt returns the node at the given index in the visible nodes list.
-func getVisibleNodeAt(allNodes []*TreeNode, index int) *TreeNode {
-	visibleNodes := getVisibleNodes(allNodes)
-	if index >= 0 && index < len(visibleNodes) {
-		return visibleNodes[index]
-	}
-	return nil
-}
-
-// countVisibleNodes counts the number of visible nodes.
-func countVisibleNodes(allNodes []*TreeNode) int {
-	return len(getVisibleNodes(allNodes))
-}
-
-// findFirstNodeWithChildren returns the first node in the list that has children
-func findFirstNodeWithChildren(nodes []*TreeNode) *TreeNode {
-	for _, node := range nodes {
-		if len(node.Children) > 0 {
-			return node
-		}
-	}
-	return nil
-}
-
-// ensureCursorVisible ensures the cursor is visible within the window
 func ensureCursorVisible(m *Model) {
 	visibleNodes := getVisibleNodes(m.nodes)
 
@@ -694,9 +754,13 @@ func renderHelpTooltip() string {
 		{"Enter", "Expand current node and all its children"},
 		{"←/h", "Collapse current node or jump to parent"},
 		{"a", "Expand all nodes"},
-		{"n", "Collapse all nodes except root level"},
+		{"A", "Collapse all nodes except root level"},
 		{"Home/g", "Jump to the top"},
 		{"End/G", "Jump to the bottom"},
+		{"/", "Start search mode"},
+		{"n", "Find next search match (when in search mode)"},
+		{"N", "Find previous search match (when in search mode)"},
+		{"Esc", "Exit search mode"},
 		{"?", "Toggle this help dialog"},
 		{"q/Ctrl+c", "Quit"},
 	}
@@ -713,4 +777,41 @@ func renderHelpTooltip() string {
 	}
 
 	return helpStyle.Render(helpContent.String())
+}
+
+func (m *Model) getSearchResults() []int {
+	// Expand all nodes recursively
+	for _, rootNode := range m.nodes {
+		expandAllNodes(rootNode)
+	}
+
+	// Refresh the list of all nodes
+	m.allNodes = flattenNodes(m.nodes)
+
+	results := []int{}
+	for i, node := range m.allNodes {
+		if strings.Contains(node.Text, m.searchString) {
+			results = append(results, i)
+		}
+	}
+	return results
+}
+
+func (m *Model) findNext(direction int) {
+	if len(m.searchResults) == 0 {
+		return
+	}
+
+	m.searchIndex += direction
+	if m.searchIndex < 0 {
+		m.searchIndex = len(m.searchResults) - 1
+	}
+
+	if m.searchIndex >= len(m.searchResults) {
+		m.searchIndex = 0
+	}
+
+	m.cursor = m.searchResults[m.searchIndex]
+	m.windowTop = m.cursor
+	ensureCursorVisible(m)
 }
