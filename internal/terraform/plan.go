@@ -124,7 +124,12 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 
 	// Process each resource change
 	for _, change := range plan.ResourceChanges {
+
 		if len(change.Change.Actions) == 0 {
+			continue
+		}
+
+		if change.Change.Actions[0] == "no-op" {
 			continue
 		}
 
@@ -215,7 +220,7 @@ func (p *PlanManager) ShowPlan(ctx interface{}, planFilePath string) error {
 		return fmt.Errorf("context type assertion failed")
 	}
 
-	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", planFilePath)
+	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", "-json", planFilePath)
 	tfshow.Stderr = os.Stderr
 	output, err := tfshow.Output()
 	if err != nil {

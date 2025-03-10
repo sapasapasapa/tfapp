@@ -2,7 +2,10 @@
 package plan
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"tfapp/internal/ui"
@@ -403,24 +406,13 @@ func (m Model) View() string {
 		if node.Type == "resource" {
 			// Resources are already colorized by the ui.Colorize function
 			colorized = ui.Colorize(line)
-		} else if node.Type == "block" {
-			// Add custom color for blocks (e.g., rule {})
-			if strings.Contains(line, "{") {
-				parts := strings.SplitN(line, "{", 2)
-				colorized = ui.ColorWarning + parts[0] + ui.ColorForegroundReset + "{"
-				if len(parts) > 1 {
-					colorized += parts[1]
-				}
-			} else {
-				colorized = ui.Colorize(line)
-			}
 		} else {
 			// Handle attributes (+ and - changes)
-			if strings.HasPrefix(strings.TrimSpace(line), "+") {
+			if strings.Contains(strings.TrimSpace(line), "+") {
 				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
-			} else if strings.HasPrefix(strings.TrimSpace(line), "-") {
+			} else if strings.Contains(strings.TrimSpace(line), "-") {
 				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
-			} else if strings.HasPrefix(strings.TrimSpace(line), "~") {
+			} else if strings.Contains(strings.TrimSpace(line), "~") {
 				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
 			} else {
 				colorized = ui.Colorize(line)
@@ -523,8 +515,62 @@ func Show(planOutput string) error {
 	return err
 }
 
+// Define JSON structure types for terraform plan
+type TerraformPlan struct {
+	FormatVersion    string           `json:"format_version"`
+	TerraformVersion string           `json:"terraform_version"`
+	ResourceChanges  []ResourceChange `json:"resource_changes"`
+	PlannedValues    PlannedValues    `json:"planned_values"`
+}
+
+type PlannedValues struct {
+	RootModule RootModule `json:"root_module"`
+}
+
+type RootModule struct {
+	Resources    []Resource    `json:"resources"`
+	ChildModules []ChildModule `json:"child_modules"`
+}
+
+type ChildModule struct {
+	Address   string     `json:"address"`
+	Resources []Resource `json:"resources"`
+}
+
+type Resource struct {
+	Address         string                 `json:"address"`
+	Type            string                 `json:"type"`
+	Name            string                 `json:"name"`
+	Values          map[string]interface{} `json:"values"`
+	SensitiveValues map[string]interface{} `json:"sensitive_values"`
+}
+
+type ResourceChange struct {
+	Address       string     `json:"address"`
+	ModuleAddress string     `json:"module_address"`
+	Mode          string     `json:"mode"`
+	Type          string     `json:"type"`
+	Name          string     `json:"name"`
+	ProviderName  string     `json:"provider_name"`
+	Change        ChangeData `json:"change"`
+}
+
+type ChangeData struct {
+	Actions      []string               `json:"actions"`
+	Before       interface{}            `json:"before"`
+	After        map[string]interface{} `json:"after"`
+	AfterUnknown map[string]interface{} `json:"after_unknown"`
+}
+
 // parsePlan parses the terraform plan output and builds a tree of nodes.
+// It now accepts both plain text and JSON format
 func parsePlan(planOutput string) []*TreeNode {
+	// Check if the input is JSON
+	if strings.TrimSpace(planOutput)[0] == '{' {
+		return parsePlanJSON(planOutput)
+	}
+
+	// Continue with the existing text parsing logic
 	lines := strings.Split(planOutput, "\n")
 
 	// Root node for the entire plan
@@ -644,18 +690,396 @@ func parsePlan(planOutput string) []*TreeNode {
 	return root.Children
 }
 
-// flattenNodes flattens the node tree into a single list, respecting expansion state.
-func flattenNodes(nodes []*TreeNode) []*TreeNode {
-	var result []*TreeNode
+// parsePlanJSON parses Terraform plan in JSON format
+func parsePlanJSON(jsonPlan string) []*TreeNode {
+	// Root node for the entire plan
+	root := &TreeNode{
+		Text:       "Terraform Plan",
+		Expanded:   true,
+		IsRoot:     true,
+		Toggleable: true,
+	}
 
-	for _, node := range nodes {
-		result = append(result, node)
-		if node.Expanded {
-			result = append(result, flattenNodes(node.Children)...)
+	// Parse the JSON
+	var plan TerraformPlan
+	err := json.Unmarshal([]byte(jsonPlan), &plan)
+	if err != nil {
+		// Return error as a node
+		errorNode := &TreeNode{
+			Text:       "Error parsing JSON: " + err.Error(),
+			Expanded:   true,
+			Type:       "error",
+			Depth:      0,
+			Parent:     root,
+			Toggleable: false,
+		}
+		root.Children = append(root.Children, errorNode)
+		return root.Children
+	}
+
+	// Process each resource change
+	for _, change := range plan.ResourceChanges {
+		if len(change.Change.Actions) == 0 {
+			continue
+		}
+
+		if change.Change.Actions[0] == "no-op" {
+			continue
+		}
+
+		// Create resource header node
+		actionText := strings.Join(change.Change.Actions, ", ")
+		var headerPrefix string
+		var resourcePrefix string
+
+		// Determine the prefix based on the action
+		switch change.Change.Actions[0] {
+		case "create":
+			headerPrefix = "# "
+			resourcePrefix = "+ "
+			actionText = "will be created"
+		case "update":
+			headerPrefix = "# "
+			resourcePrefix = "~ "
+			actionText = "will be updated"
+		case "delete":
+			headerPrefix = "# "
+			resourcePrefix = "- "
+			actionText = "will be destroyed"
+		default:
+			headerPrefix = "# "
+			resourcePrefix = "  "
+		}
+
+		resourceHeader := headerPrefix + change.Address + " " + actionText
+
+		resourceNode := &TreeNode{
+			Text:       resourceHeader,
+			Expanded:   true,
+			Type:       "resource",
+			Depth:      0,
+			Parent:     root,
+			Toggleable: false,
+		}
+
+		root.Children = append(root.Children, resourceNode)
+
+		// Create the resource definition line
+		resourceDefText := resourcePrefix + "resource \"" + change.Type + "\" \"" + change.Name + "\" {"
+		resourceDefNode := &TreeNode{
+			Text:       resourceDefText,
+			Expanded:   false,
+			Type:       "block",
+			Depth:      0,
+			Parent:     root,
+			Toggleable: true,
+		}
+
+		root.Children = append(root.Children, resourceDefNode)
+
+		// Add attributes and nested blocks
+		processAttributes(resourceDefNode, change.Change.After, change.Change.AfterUnknown, 2, "+")
+
+		// Add closing brace for resource block
+		closingNode := &TreeNode{
+			Text:       "}",
+			Expanded:   false,
+			Type:       "attribute",
+			Depth:      0,
+			Parent:     resourceDefNode,
+			Toggleable: false,
+		}
+
+		resourceDefNode.Children = append(resourceDefNode.Children, closingNode)
+	}
+
+	return root.Children
+}
+
+// processAttributes recursively processes attributes and blocks
+func processAttributes(parentNode *TreeNode, attrs map[string]interface{}, unknownAttrs map[string]interface{}, depth int, prefix string) {
+	// Sort keys for consistent output
+	var keys []string
+	for k := range attrs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		value := attrs[key]
+		unknown := false
+
+		// Check if the value is known or will be known after apply
+		if unknownAttrs != nil {
+			if unknownVal, exists := unknownAttrs[key]; exists {
+				if boolVal, ok := unknownVal.(bool); ok && boolVal {
+					unknown = true
+				}
+			}
+		}
+
+		switch v := value.(type) {
+		case map[string]interface{}:
+			// For labels and specific map types, format as inline
+			if key == "terraform_labels" || key == "effective_labels" || key == "labels" || key == "tags" {
+				blockNode := &TreeNode{
+					Text:       prefix + " " + key + " = {",
+					Expanded:   false,
+					Type:       "block",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: true,
+				}
+
+				parentNode.Children = append(parentNode.Children, blockNode)
+
+				// Format map entries properly
+				formatMapEntries(blockNode, v, depth+1, prefix)
+
+				// Add closing brace
+				closingNode := &TreeNode{
+					Text:       "}",
+					Expanded:   true,
+					Type:       "attribute",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: false,
+				}
+
+				parentNode.Children = append(parentNode.Children, closingNode)
+			} else {
+				// This is a nested block
+				blockNode := &TreeNode{
+					Text:       prefix + " " + key + " {",
+					Expanded:   false,
+					Type:       "block",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: true,
+				}
+
+				parentNode.Children = append(parentNode.Children, blockNode)
+
+				// Process nested attributes
+				var nestedUnknown map[string]interface{}
+				if unknownAttrs != nil {
+					if unknownBlock, exists := unknownAttrs[key].(map[string]interface{}); exists {
+						nestedUnknown = unknownBlock
+					}
+				}
+
+				processAttributes(blockNode, v, nestedUnknown, depth+1, prefix)
+
+				// Add closing brace
+				closingNode := &TreeNode{
+					Text:       "}",
+					Expanded:   true,
+					Type:       "attribute",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: false,
+				}
+
+				parentNode.Children = append(parentNode.Children, closingNode)
+			}
+
+		case []interface{}:
+			// This is a list of items
+			if len(v) > 0 {
+				blockNode := &TreeNode{
+					Text:       prefix + " " + key + " {",
+					Expanded:   false,
+					Type:       "block",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: true,
+				}
+
+				parentNode.Children = append(parentNode.Children, blockNode)
+
+				// Process each item in the list
+				for i, item := range v {
+					if mapItem, ok := item.(map[string]interface{}); ok {
+						// For maps in a list, process as nested blocks
+						itemNode := &TreeNode{
+							Text:       prefix + " [" + strconv.Itoa(i) + "] {",
+							Expanded:   false,
+							Type:       "block",
+							Depth:      depth + 1,
+							Parent:     blockNode,
+							Toggleable: true,
+						}
+
+						blockNode.Children = append(blockNode.Children, itemNode)
+
+						// Handle nested unknown values
+						var nestedUnknown map[string]interface{}
+						if unknownAttrs != nil && i < len(v) {
+							if unknownList, exists := unknownAttrs[key].([]interface{}); exists && i < len(unknownList) {
+								if unknownMap, ok := unknownList[i].(map[string]interface{}); ok {
+									nestedUnknown = unknownMap
+								}
+							}
+						}
+
+						processAttributes(itemNode, mapItem, nestedUnknown, depth+2, prefix)
+
+						// Add closing brace
+						itemClosingNode := &TreeNode{
+							Text:       "}",
+							Expanded:   true,
+							Type:       "attribute",
+							Depth:      depth + 1,
+							Parent:     blockNode,
+							Toggleable: false,
+						}
+
+						blockNode.Children = append(blockNode.Children, itemClosingNode)
+					} else {
+						// Simple value in list
+						valueText := fmt.Sprintf("%v", item)
+						listItemNode := &TreeNode{
+							Text:       prefix + " " + valueText,
+							Expanded:   true,
+							Type:       "attribute",
+							Depth:      depth + 1,
+							Parent:     blockNode,
+							Toggleable: false,
+						}
+
+						blockNode.Children = append(blockNode.Children, listItemNode)
+					}
+				}
+
+				// Add closing brace for the list
+				closingNode := &TreeNode{
+					Text:       "}",
+					Expanded:   true,
+					Type:       "attribute",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: false,
+				}
+
+				parentNode.Children = append(parentNode.Children, closingNode)
+			} else if unknown {
+				// Empty list that will be known after apply
+				attributeNode := &TreeNode{
+					Text:       prefix + " " + key + " = (known after apply)",
+					Expanded:   true,
+					Type:       "attribute",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: false,
+				}
+
+				parentNode.Children = append(parentNode.Children, attributeNode)
+			} else {
+				// Empty list with known values (empty list)
+				attributeNode := &TreeNode{
+					Text:       prefix + " " + key + " = []",
+					Expanded:   true,
+					Type:       "attribute",
+					Depth:      depth,
+					Parent:     parentNode,
+					Toggleable: false,
+				}
+
+				parentNode.Children = append(parentNode.Children, attributeNode)
+			}
+
+		default:
+			// This is a simple attribute
+			var valueText string
+
+			if unknown {
+				valueText = "(known after apply)"
+			} else if v == nil {
+				valueText = "null"
+			} else {
+				valueText = fmt.Sprintf("%v", v)
+				// Add quotes for string values
+				if _, ok := v.(string); ok {
+					valueText = "\"" + valueText + "\""
+				}
+			}
+
+			attributeNode := &TreeNode{
+				Text:       prefix + " " + key + " = " + valueText,
+				Expanded:   true,
+				Type:       "attribute",
+				Depth:      depth,
+				Parent:     parentNode,
+				Toggleable: false,
+			}
+
+			parentNode.Children = append(parentNode.Children, attributeNode)
 		}
 	}
 
-	return result
+	// Add any unknown attributes that aren't in the original map
+	if unknownAttrs != nil {
+		for k, v := range unknownAttrs {
+			if _, exists := attrs[k]; !exists {
+				// Only process true boolean unknowns that don't exist in attrs
+				if boolVal, ok := v.(bool); ok && boolVal {
+					attributeNode := &TreeNode{
+						Text:       prefix + " " + k + " = (known after apply)",
+						Expanded:   true,
+						Type:       "attribute",
+						Depth:      depth,
+						Parent:     parentNode,
+						Toggleable: false,
+					}
+
+					parentNode.Children = append(parentNode.Children, attributeNode)
+				} else if mapVal, ok := v.(map[string]interface{}); ok && len(mapVal) > 0 {
+					// This is a block that exists only in unknown
+					blockNode := &TreeNode{
+						Text:       prefix + " " + k + " (known after apply)",
+						Expanded:   false,
+						Type:       "block",
+						Depth:      depth,
+						Parent:     parentNode,
+						Toggleable: true,
+					}
+
+					parentNode.Children = append(parentNode.Children, blockNode)
+				}
+			}
+		}
+	}
+}
+
+// formatMapEntries formats a map as indented key-value pairs
+func formatMapEntries(parentNode *TreeNode, mapData map[string]interface{}, depth int, prefix string) {
+	// Sort keys for consistent output
+	var keys []string
+	for k := range mapData {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		value := mapData[key]
+		valueText := fmt.Sprintf("%v", value)
+
+		// Add quotes for string values
+		if _, ok := value.(string); ok {
+			valueText = "\"" + valueText + "\""
+		}
+
+		entryNode := &TreeNode{
+			Text:       prefix + " \"" + key + "\" = " + valueText,
+			Expanded:   true,
+			Type:       "attribute",
+			Depth:      depth,
+			Parent:     parentNode,
+			Toggleable: false,
+		}
+
+		parentNode.Children = append(parentNode.Children, entryNode)
+	}
 }
 
 func getVisibleNodes(nodes []*TreeNode) []*TreeNode {
@@ -814,4 +1238,18 @@ func (m *Model) findNext(direction int) {
 	m.cursor = m.searchResults[m.searchIndex]
 	m.windowTop = m.cursor
 	ensureCursorVisible(m)
+}
+
+// flattenNodes flattens the node tree into a single list, respecting expansion state.
+func flattenNodes(nodes []*TreeNode) []*TreeNode {
+	var result []*TreeNode
+
+	for _, node := range nodes {
+		result = append(result, node)
+		if node.Expanded {
+			result = append(result, flattenNodes(node.Children)...)
+		}
+	}
+
+	return result
 }
