@@ -50,8 +50,6 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 	fmt.Printf("%s%sTerraform plan has been successfully created!%s\n",
 		ui.ColorSuccess, ui.TextBold, ui.ColorReset)
 
-	fmt.Println("\nSummary of proposed changes:")
-
 	// Get plan details
 	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", "-no-color", planFilePath)
 	tfshow.Stderr = os.Stderr
@@ -59,6 +57,14 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 	if err != nil {
 		return nil, fmt.Errorf("error showing plan: %w", err)
 	}
+
+	if strings.Contains(string(output), "No changes.") {
+		fmt.Printf("%s%sNo changes detected in plan. Your infrastructure matches the configuration.%s\n",
+			ui.ColorInfo, ui.TextBold, ui.ColorReset)
+		os.Exit(0)
+	}
+
+	fmt.Println("\nSummary of proposed changes:")
 
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
