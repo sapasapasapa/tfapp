@@ -59,7 +59,7 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 	}
 
 	if strings.Contains(string(output), "No changes.") {
-		fmt.Printf("%s%sNo changes detected in plan. Your infrastructure matches the configuration.%s\n",
+		fmt.Printf("%s%sNo changes detected in plan. Your infrastructure is up-to-date.%s\n",
 			ui.ColorInfo, ui.TextBold, ui.ColorReset)
 		os.Exit(0)
 	}
