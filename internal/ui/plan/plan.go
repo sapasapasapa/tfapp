@@ -134,10 +134,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Get visible nodes and check if we can move up
 				if m.cursor > 0 {
 					m.cursor--
-					// Adjust window if needed
-					if m.cursor < m.windowTop {
-						m.windowTop = m.cursor
-					}
+					// Use ensureCursorVisible to properly adjust the window
+					ensureCursorVisible(&m)
 				}
 
 			case "down", "j":
@@ -145,17 +143,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				visibleNodes := getVisibleNodes(m.nodes)
 				if m.cursor < len(visibleNodes)-1 {
 					m.cursor++
-
-					// Calculate effective window height (accounting for status bar)
-					effectiveWindowHeight := m.windowHeight - 1
-					if effectiveWindowHeight < 1 {
-						effectiveWindowHeight = 1
-					}
-
-					// Adjust window if needed
-					if m.cursor >= m.windowTop+effectiveWindowHeight {
-						m.windowTop = m.cursor - effectiveWindowHeight + 1
-					}
+					// Use ensureCursorVisible to properly adjust the window
+					ensureCursorVisible(&m)
 				}
 
 			case "right", "l", " ":
@@ -251,7 +240,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				// Set cursor to first line and ensure it's visible
 				m.cursor = 0
-				m.windowTop = 0
 
 				// Ensure cursor is visible after collapse
 				ensureCursorVisible(&m)
@@ -329,7 +317,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "home", "g":
 				// Jump to the top of the plan
 				m.cursor = 0
-				m.windowTop = 0
+				ensureCursorVisible(&m)
 
 			case "end", "G":
 				// Jump to the bottom of the plan
@@ -927,7 +915,6 @@ func (m *Model) findNext(direction int) {
 	}
 
 	m.cursor = m.searchResults[m.searchIndex]
-	m.windowTop = m.cursor
 	ensureCursorVisible(m)
 }
 
