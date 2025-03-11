@@ -41,12 +41,12 @@ type ColorConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Colors: ColorConfig{
-			Info:      "#36c", // Cyan/Blue
-			Success:   "#2a2", // Green
-			Warning:   "#fa0", // Yellow/Orange
-			Error:     "#f33", // Red
-			Highlight: "#83f", // Purple
-			Faint:     "#777", // Gray
+			Info:      "#3366cc", // Cyan/Blue (was #36c)
+			Success:   "#22aa22", // Green (was #2a2)
+			Warning:   "#ffaa00", // Yellow/Orange (was #fa0)
+			Error:     "#ff3333", // Red (was #f33)
+			Highlight: "#8833ff", // Purple (was #83f)
+			Faint:     "#777777", // Gray (was #777)
 		},
 		UI: UIConfig{
 			SpinnerType: "MiniDot", // Default spinner type

@@ -3,6 +3,8 @@ package plan
 
 import (
 	"fmt"
+	"reflect"
+	"regexp"
 	"strings"
 
 	"tfapp/internal/ui"
@@ -21,6 +23,7 @@ type TreeNode struct {
 	Type       string      // Type of node (resource, block, attribute)
 	IsRoot     bool        // Whether this is a root node
 	Toggleable bool        // Whether this node can be expanded/collapsed
+	ChangeType string      // Type of change (create, update, delete, replace)
 }
 
 // Model represents the state of the plan viewer.
@@ -30,6 +33,7 @@ type Model struct {
 	cursor           int         // Current cursor position
 	windowTop        int         // The top line of the window being displayed
 	windowHeight     int         // Height of visible window
+	terminalWidth    int         // Width of the terminal window for text wrapping
 	quitting         bool        // Whether the user is quitting
 	ready            bool        // Whether we've received the window size yet
 	showHelp         bool        // Whether to show the help tooltip
@@ -60,6 +64,7 @@ func New(planOutput string) Model {
 		cursor:           0,
 		windowTop:        0,
 		windowHeight:     25, // Show approximately 25 lines at a time for better visibility
+		terminalWidth:    80, // Default terminal width
 		quitting:         false,
 		ready:            false,
 		showHelp:         false,
@@ -90,6 +95,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.windowHeight < 5 {
 			m.windowHeight = 5 // Minimum reasonable height
 		}
+
+		// Store terminal width for text wrapping
+		m.terminalWidth = msg.Width
 
 		// Mark as ready now that we've received window dimensions
 		m.ready = true
@@ -126,21 +134,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Get visible nodes and check if we can move up
 				if m.cursor > 0 {
 					m.cursor--
-					// Adjust window if needed
-					if m.cursor < m.windowTop {
-						m.windowTop = m.cursor
-					}
+					// Use ensureCursorVisible to properly adjust the window
+					ensureCursorVisible(&m)
 				}
 
 			case "down", "j":
 				// Get visible nodes and check if we can move down
 				visibleNodes := getVisibleNodes(m.nodes)
-				if m.cursor < len(visibleNodes)-2 {
+				if m.cursor < len(visibleNodes)-1 {
 					m.cursor++
-					// Adjust window if needed
-					if m.cursor >= m.windowTop+m.windowHeight-1 {
-						m.windowTop = m.cursor - m.windowHeight + 2
-					}
+					// Use ensureCursorVisible to properly adjust the window
+					ensureCursorVisible(&m)
 				}
 
 			case "right", "l", " ":
@@ -220,6 +224,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Refresh the list of all nodes
 				m.allNodes = flattenNodes(m.nodes)
 
+				// Ensure cursor is visible after expansion
+				ensureCursorVisible(&m)
+
 			case "A":
 				// Collapse all nodes with children
 				for _, node := range m.allNodes {
@@ -231,28 +238,95 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Refresh the list of all nodes
 				m.allNodes = flattenNodes(m.nodes)
 
-				// Set cursor to first line
+				// Set cursor to first line and ensure it's visible
 				m.cursor = 0
-				m.windowTop = 0
+
+				// Ensure cursor is visible after collapse
+				ensureCursorVisible(&m)
+
+			case "n":
+				// Jump to the next root node of resource type at depth 0
+				visibleNodes := getVisibleNodes(m.nodes)
+				if len(visibleNodes) > 0 {
+					// Start searching from the node after current cursor position
+					startPos := m.cursor + 1
+					if startPos >= len(visibleNodes) {
+						startPos = 0 // Wrap around to the beginning
+					}
+
+					// First, search from cursor to end
+					found := false
+					for i := startPos; i < len(visibleNodes); i++ {
+						if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+							m.cursor = i
+							found = true
+							break
+						}
+					}
+
+					// If not found and we started after position 0, search from beginning to cursor
+					if !found && startPos > 0 {
+						for i := 0; i < startPos; i++ {
+							if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+								m.cursor = i
+								found = true
+								break
+							}
+						}
+					}
+
+					// Ensure the cursor is visible in the window
+					ensureCursorVisible(&m)
+				}
+
+			case "N":
+				// Jump to the previous root node of resource type at depth 0
+				visibleNodes := getVisibleNodes(m.nodes)
+				if len(visibleNodes) > 0 {
+					// Start searching from the node before current cursor position
+					startPos := m.cursor - 1
+					if startPos < 0 {
+						startPos = len(visibleNodes) - 1 // Wrap around to the end
+					}
+
+					// First, search from cursor to beginning
+					found := false
+					for i := startPos; i >= 0; i-- {
+						if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+							m.cursor = i
+							found = true
+							break
+						}
+					}
+
+					// If not found and we started before the end, search from end to cursor
+					if !found && startPos < len(visibleNodes)-1 {
+						for i := len(visibleNodes) - 1; i > startPos; i-- {
+							if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+								m.cursor = i
+								found = true
+								break
+							}
+						}
+					}
+
+					// Ensure the cursor is visible in the window
+					ensureCursorVisible(&m)
+				}
 
 			case "home", "g":
 				// Jump to the top of the plan
 				m.cursor = 0
-				m.windowTop = 0
+				ensureCursorVisible(&m)
 
 			case "end", "G":
 				// Jump to the bottom of the plan
 				visibleNodes := getVisibleNodes(m.nodes)
 				if len(visibleNodes) > 0 {
+					// Set cursor directly to the last visible node
 					m.cursor = len(visibleNodes) - 1
-					// Adjust window if needed
-					if m.cursor >= m.windowTop+m.windowHeight {
-						m.windowTop = m.cursor - m.windowHeight + 1
-						if m.windowTop < 0 {
-							m.windowTop = 0
-						}
-					}
-					m.cursor -= 1
+					// Ensure cursor is visible
+					ensureCursorVisible(&m)
 				}
 			case "/":
 				// Search for a resource by name
@@ -346,6 +420,12 @@ func (m Model) View() string {
 		contentEnd = totalNodes
 	}
 
+	// Calculate effective width for text wrapping (accounting for cursor and some buffer)
+	effectiveWidth := m.terminalWidth - 2 // Account for cursor space
+	if effectiveWidth < 20 {
+		effectiveWidth = 20 // Minimum reasonable width
+	}
+
 	// Render visible nodes
 	for i := start; i < contentEnd; i++ {
 		node := visibleNodes[i]
@@ -403,27 +483,47 @@ func (m Model) View() string {
 		if node.Type == "resource" {
 			// Resources are already colorized by the ui.Colorize function
 			colorized = ui.Colorize(line)
-		} else if node.Type == "block" {
-			// Add custom color for blocks (e.g., rule {})
-			if strings.Contains(line, "{") {
-				parts := strings.SplitN(line, "{", 2)
-				colorized = ui.ColorWarning + parts[0] + ui.ColorForegroundReset + "{"
-				if len(parts) > 1 {
-					colorized += parts[1]
-				}
-			} else {
-				colorized = ui.Colorize(line)
-			}
 		} else {
-			// Handle attributes (+ and - changes)
-			if strings.HasPrefix(strings.TrimSpace(line), "+") {
-				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
-			} else if strings.HasPrefix(strings.TrimSpace(line), "-") {
-				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
-			} else if strings.HasPrefix(strings.TrimSpace(line), "~") {
-				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
-			} else {
-				colorized = ui.Colorize(line)
+			// Apply color based on the node's change type
+			switch node.ChangeType {
+			case "create":
+				if strings.Contains(strings.TrimSpace(line), "+") {
+					colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
+				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
+					// Don't color closing braces
+					colorized = line
+				} else {
+					colorized = ui.ColorSuccess + line + ui.ColorForegroundReset
+				}
+			case "delete":
+				if strings.Contains(strings.TrimSpace(line), "-") {
+					colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
+				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
+					// Don't color closing braces
+					colorized = line
+				} else {
+					colorized = ui.ColorError + line + ui.ColorForegroundReset
+				}
+			case "update", "replace":
+				if strings.Contains(strings.TrimSpace(line), "~") {
+					colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
+				} else if strings.Contains(strings.TrimSpace(line), "-/+") {
+					colorized = strings.Replace(line, "-/+", ui.ColorError+"-"+ui.ColorForegroundReset+"/"+ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
+				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
+					colorized = line
+				} else {
+					colorized = ui.ColorWarning + line + ui.ColorForegroundReset
+				}
+			default:
+				// For comments (like "# (5 unchanged attributes hidden)")
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					colorized = ui.ColorInfo + line + ui.ColorForegroundReset
+				} else if node.Type == "closing_brace" {
+					// Never color closing braces
+					colorized = line
+				} else {
+					colorized = ui.Colorize(line)
+				}
 			}
 		}
 
@@ -434,8 +534,11 @@ func (m Model) View() string {
 				Render(colorized)
 		}
 
+		// Apply text wrapping to handle long lines
+		wrappedText := wrapText(colorized, effectiveWidth, indent)
+
 		// Write the line to output
-		sb.WriteString(cursor + colorized + "\n")
+		sb.WriteString(cursor + wrappedText + "\n")
 	}
 
 	// Calculate the percentage
@@ -524,7 +627,14 @@ func Show(planOutput string) error {
 }
 
 // parsePlan parses the terraform plan output and builds a tree of nodes.
+// It now accepts both plain text and JSON format
 func parsePlan(planOutput string) []*TreeNode {
+	// Check if the input is JSON
+	if strings.TrimSpace(planOutput)[0] == '{' {
+		return parsePlanJSON(planOutput)
+	}
+
+	// Continue with the existing text parsing logic
 	lines := strings.Split(planOutput, "\n")
 
 	// Root node for the entire plan
@@ -644,20 +754,6 @@ func parsePlan(planOutput string) []*TreeNode {
 	return root.Children
 }
 
-// flattenNodes flattens the node tree into a single list, respecting expansion state.
-func flattenNodes(nodes []*TreeNode) []*TreeNode {
-	var result []*TreeNode
-
-	for _, node := range nodes {
-		result = append(result, node)
-		if node.Expanded {
-			result = append(result, flattenNodes(node.Children)...)
-		}
-	}
-
-	return result
-}
-
 func getVisibleNodes(nodes []*TreeNode) []*TreeNode {
 	var result []*TreeNode
 
@@ -677,18 +773,25 @@ func ensureCursorVisible(m *Model) {
 	// Make sure cursor is within visible nodes range
 	if m.cursor >= len(visibleNodes) {
 		m.cursor = len(visibleNodes) - 1
-		if m.cursor < 0 {
-			m.cursor = 0
-		}
+	}
+	// Ensure cursor is never negative
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+
+	// Content height (accounting for status bar)
+	effectiveWindowHeight := m.windowHeight - 1
+	if effectiveWindowHeight < 1 {
+		effectiveWindowHeight = 1
 	}
 
 	// Check if cursor is outside visible window
 	if m.cursor < m.windowTop {
-		// Cursor is above the window, adjust windowTop to show cursor
+		// Cursor is above the window, adjust windowTop to show cursor at top
 		m.windowTop = m.cursor
-	} else if m.cursor >= m.windowTop+m.windowHeight {
-		// Cursor is below the window, adjust windowTop to show cursor
-		m.windowTop = m.cursor - m.windowHeight + 1
+	} else if m.cursor >= m.windowTop+effectiveWindowHeight {
+		// Cursor is below the window, adjust windowTop to show cursor at bottom of window
+		m.windowTop = m.cursor - effectiveWindowHeight + 1
 	}
 
 	// Ensure windowTop is not negative
@@ -696,8 +799,8 @@ func ensureCursorVisible(m *Model) {
 		m.windowTop = 0
 	}
 
-	// Ensure windowTop isn't too large
-	maxTop := len(visibleNodes) - m.windowHeight
+	// Ensure windowTop isn't too large (which would leave empty space at bottom)
+	maxTop := len(visibleNodes) - effectiveWindowHeight
 	if maxTop < 0 {
 		maxTop = 0
 	}
@@ -755,11 +858,11 @@ func renderHelpTooltip() string {
 		{"←/h", "Collapse current node or jump to parent"},
 		{"a", "Expand all nodes"},
 		{"A", "Collapse all nodes except root level"},
+		{"n", "Jump to next root resource (in normal mode) or next search match (in search mode)"},
+		{"N", "Jump to previous root resource (in normal mode) or previous search match (in search mode)"},
 		{"Home/g", "Jump to the top"},
 		{"End/G", "Jump to the bottom"},
 		{"/", "Start search mode"},
-		{"n", "Find next search match (when in search mode)"},
-		{"N", "Find previous search match (when in search mode)"},
 		{"Esc", "Exit search mode"},
 		{"?", "Toggle this help dialog"},
 		{"q/Ctrl+c", "Quit"},
@@ -812,6 +915,170 @@ func (m *Model) findNext(direction int) {
 	}
 
 	m.cursor = m.searchResults[m.searchIndex]
-	m.windowTop = m.cursor
 	ensureCursorVisible(m)
+}
+
+// flattenNodes flattens the node tree into a single list, respecting expansion state.
+func flattenNodes(nodes []*TreeNode) []*TreeNode {
+	var result []*TreeNode
+
+	for _, node := range nodes {
+		result = append(result, node)
+		if node.Expanded {
+			result = append(result, flattenNodes(node.Children)...)
+		}
+	}
+
+	return result
+}
+
+// createClosingBrace creates a closing brace node with consistent type and formatting
+func createClosingBrace(depth int, parent *TreeNode) *TreeNode {
+	return &TreeNode{
+		Text:       "}",
+		Expanded:   true,
+		Type:       "closing_brace",
+		Depth:      depth,
+		Parent:     parent,
+		Toggleable: false,
+		ChangeType: "no-op",
+	}
+}
+
+// isEffectivelyEqual compares two values and determines if they're effectively equal
+// This handles special cases like empty strings, empty maps, and nulls
+func isEffectivelyEqual(a, b interface{}) bool {
+	// If both are nil or exactly equal, they're equal
+	if a == nil && b == nil {
+		return true
+	}
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
+
+	// Check if one is nil and the other is an empty string
+	aStr, aIsStr := a.(string)
+	if aIsStr && b == nil && aStr == "" {
+		return true
+	}
+
+	bStr, bIsStr := b.(string)
+	if bIsStr && a == nil && bStr == "" {
+		return true
+	}
+
+	// Check for empty strings
+	if aIsStr && bIsStr && (aStr == "" && bStr == "") {
+		return true
+	}
+
+	// Check for empty maps
+	aMap, aIsMap := a.(map[string]interface{})
+	bMap, bIsMap := b.(map[string]interface{})
+	if aIsMap && bIsMap && (len(aMap) == 0 && len(bMap) == 0) {
+		return true
+	}
+
+	// Map to nil comparison
+	if aIsMap && b == nil && len(aMap) == 0 {
+		return true
+	}
+	if bIsMap && a == nil && len(bMap) == 0 {
+		return true
+	}
+
+	// Check for empty arrays
+	aSlice, aIsSlice := a.([]interface{})
+	bSlice, bIsSlice := b.([]interface{})
+	if aIsSlice && bIsSlice && (len(aSlice) == 0 && len(bSlice) == 0) {
+		return true
+	}
+
+	// Array to nil comparison
+	if aIsSlice && b == nil && len(aSlice) == 0 {
+		return true
+	}
+	if bIsSlice && a == nil && len(bSlice) == 0 {
+		return true
+	}
+
+	return false
+}
+
+// wrapText wraps text at the specified width while preserving ANSI color codes
+// and maintaining proper indentation for wrapped lines.
+func wrapText(text string, width int, indentStr string) string {
+	if width <= 0 {
+		return text // No wrapping needed
+	}
+
+	// Find all ANSI color codes in the text
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	ansiMatches := ansiRegex.FindAllStringIndex(text, -1)
+
+	// If there are no ANSI codes or the text is shorter than width, return as is
+	if len(ansiMatches) == 0 && len(text) <= width {
+		return text
+	}
+
+	var result strings.Builder
+	var currentLine strings.Builder
+	var activeColorCode string
+	var visualLength int
+
+	// Process the text character by character
+	for i := 0; i < len(text); i++ {
+		// Check if current position is the start of an ANSI code
+		isAnsiStart := false
+		for _, match := range ansiMatches {
+			if i == match[0] {
+				// Extract the ANSI code
+				ansiCode := text[match[0]:match[1]]
+				currentLine.WriteString(ansiCode)
+
+				// Store the active color code if it's a color code
+				if !strings.Contains(ansiCode, "[0m") { // If not a reset code
+					activeColorCode = ansiCode
+				} else {
+					activeColorCode = ""
+				}
+
+				// Skip to the end of the ANSI code
+				i = match[1] - 1
+				isAnsiStart = true
+				break
+			}
+		}
+
+		if isAnsiStart {
+			continue
+		}
+
+		// Add the current character
+		currentLine.WriteByte(text[i])
+		visualLength++
+
+		// Check if we need to wrap
+		if visualLength >= width && i < len(text)-1 {
+			// Write the current line to the result
+			result.WriteString(currentLine.String())
+			result.WriteString("\n")
+
+			// Start a new line with proper indentation and active color code
+			currentLine.Reset()
+			currentLine.WriteString(indentStr + "  ") // Additional indentation for wrapped lines
+			if activeColorCode != "" {
+				currentLine.WriteString(activeColorCode)
+			}
+
+			visualLength = 0
+		}
+	}
+
+	// Add the last line if there's anything left
+	if currentLine.Len() > 0 {
+		result.WriteString(currentLine.String())
+	}
+
+	return result.String()
 }

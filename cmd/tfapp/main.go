@@ -36,6 +36,9 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
+	// Initialize UI colors from configuration
+	ui.InitColors(cfg)
+
 	// Display a message if the config was created
 	if configCreated {
 		configPath, _ := config.ConfigFilePath()
@@ -43,9 +46,6 @@ func main() {
 		fmt.Printf("%sYou can edit this file to customize the application colors.%s\n", ui.ColorInfo, ui.ColorReset)
 		fmt.Println()
 	}
-
-	// Initialize UI colors from configuration
-	ui.InitColors(cfg)
 
 	// Parse command-line flags
 	flags := cli.ParseFlags()
