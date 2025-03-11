@@ -80,17 +80,17 @@ func GetHexColorByName(name string) string {
 	if appConfig == nil {
 		switch strings.ToLower(name) {
 		case "highlight":
-			return "#8239F3" // Purple for highlights
+			return "#8833ff" // Purple for highlights
 		case "faint":
 			return "#777777" // Gray for less important text
 		case "info":
-			return "#36c" // Cyan/Blue
+			return "#3366cc" // Cyan/Blue
 		case "success":
-			return "#2a2" // Green
+			return "#22aa22" // Green
 		case "warning":
-			return "#fa0" // Yellow/Orange
+			return "#ffaa00" // Yellow/Orange
 		case "error":
-			return "#f33" // Red
+			return "#ff3333" // Red
 		default:
 			return "" // No color
 		}
