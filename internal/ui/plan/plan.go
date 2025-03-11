@@ -4,6 +4,7 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ type TreeNode struct {
 	Type       string      // Type of node (resource, block, attribute)
 	IsRoot     bool        // Whether this is a root node
 	Toggleable bool        // Whether this node can be expanded/collapsed
+	ChangeType string      // Type of change (create, update, delete, replace)
 }
 
 // Model represents the state of the plan viewer.
@@ -407,15 +409,46 @@ func (m Model) View() string {
 			// Resources are already colorized by the ui.Colorize function
 			colorized = ui.Colorize(line)
 		} else {
-			// Handle attributes (+ and - changes)
-			if strings.Contains(strings.TrimSpace(line), "+") {
-				colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
-			} else if strings.Contains(strings.TrimSpace(line), "-") {
-				colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
-			} else if strings.Contains(strings.TrimSpace(line), "~") {
-				colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
-			} else {
-				colorized = ui.Colorize(line)
+			// Apply color based on the node's change type
+			switch node.ChangeType {
+			case "create":
+				if strings.Contains(strings.TrimSpace(line), "+") {
+					colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
+				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
+					// Don't color closing braces
+					colorized = line
+				} else {
+					colorized = ui.ColorSuccess + line + ui.ColorForegroundReset
+				}
+			case "delete":
+				if strings.Contains(strings.TrimSpace(line), "-") {
+					colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
+				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
+					// Don't color closing braces
+					colorized = line
+				} else {
+					colorized = ui.ColorError + line + ui.ColorForegroundReset
+				}
+			case "update", "replace":
+				if strings.Contains(strings.TrimSpace(line), "~") {
+					colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
+				} else if strings.Contains(strings.TrimSpace(line), "-/+") {
+					colorized = strings.Replace(line, "-/+", ui.ColorError+"-"+ui.ColorForegroundReset+"/"+ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
+				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
+					colorized = line
+				} else {
+					colorized = ui.ColorWarning + line + ui.ColorForegroundReset
+				}
+			default:
+				// For comments (like "# (5 unchanged attributes hidden)")
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					colorized = ui.ColorInfo + line + ui.ColorForegroundReset
+				} else if node.Type == "closing_brace" {
+					// Never color closing braces
+					colorized = line
+				} else {
+					colorized = ui.Colorize(line)
+				}
 			}
 		}
 
@@ -731,24 +764,45 @@ func parsePlanJSON(jsonPlan string) []*TreeNode {
 		actionText := strings.Join(change.Change.Actions, ", ")
 		var headerPrefix string
 		var resourcePrefix string
+		var changeType string
 
-		// Determine the prefix based on the action
-		switch change.Change.Actions[0] {
-		case "create":
+		// Determine the prefix and change type based on the actions
+		isReplacement := false
+		for _, action := range change.Change.Actions {
+			if action == "delete" && (contains(change.Change.Actions, "create") || contains(change.Change.Actions, "read")) {
+				isReplacement = true
+				break
+			}
+		}
+
+		if isReplacement {
 			headerPrefix = "# "
-			resourcePrefix = "+ "
-			actionText = "will be created"
-		case "update":
-			headerPrefix = "# "
-			resourcePrefix = "~ "
-			actionText = "will be updated"
-		case "delete":
-			headerPrefix = "# "
-			resourcePrefix = "- "
-			actionText = "will be destroyed"
-		default:
-			headerPrefix = "# "
-			resourcePrefix = "  "
+			resourcePrefix = "-/+ "
+			actionText = "will be replaced"
+			changeType = "replace"
+		} else {
+			// Handle non-replacement actions
+			switch change.Change.Actions[0] {
+			case "create":
+				headerPrefix = "# "
+				resourcePrefix = "+ "
+				actionText = "will be created"
+				changeType = "create"
+			case "update":
+				headerPrefix = "# "
+				resourcePrefix = "~ "
+				actionText = "will be updated"
+				changeType = "update"
+			case "delete":
+				headerPrefix = "# "
+				resourcePrefix = "- "
+				actionText = "will be destroyed"
+				changeType = "delete"
+			default:
+				headerPrefix = "# "
+				resourcePrefix = "  "
+				changeType = "unknown"
+			}
 		}
 
 		resourceHeader := headerPrefix + change.Address + " " + actionText
@@ -760,6 +814,7 @@ func parsePlanJSON(jsonPlan string) []*TreeNode {
 			Depth:      0,
 			Parent:     root,
 			Toggleable: false,
+			ChangeType: changeType,
 		}
 
 		root.Children = append(root.Children, resourceNode)
@@ -773,40 +828,69 @@ func parsePlanJSON(jsonPlan string) []*TreeNode {
 			Depth:      0,
 			Parent:     root,
 			Toggleable: true,
+			ChangeType: changeType,
 		}
 
 		root.Children = append(root.Children, resourceDefNode)
 
-		// Add attributes and nested blocks
-		processAttributes(resourceDefNode, change.Change.After, change.Change.AfterUnknown, 2, "+")
-
-		// Add closing brace for resource block
-		closingNode := &TreeNode{
-			Text:       "}",
-			Expanded:   false,
-			Type:       "attribute",
-			Depth:      0,
-			Parent:     resourceDefNode,
-			Toggleable: false,
+		// Convert Before to map if it exists, otherwise use empty map
+		var beforeMap map[string]interface{}
+		if before, ok := change.Change.Before.(map[string]interface{}); ok {
+			beforeMap = before
+		} else {
+			beforeMap = make(map[string]interface{})
 		}
 
+		// Add attributes and nested blocks, passing both before and after
+		processAttributes(resourceDefNode, beforeMap, change.Change.After, change.Change.AfterUnknown, 2, resourcePrefix)
+
+		// Add closing brace for resource block
+		closingNode := createClosingBrace(0, resourceDefNode)
 		resourceDefNode.Children = append(resourceDefNode.Children, closingNode)
 	}
 
 	return root.Children
 }
 
+// Helper function to check if a string is in a slice
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 // processAttributes recursively processes attributes and blocks
-func processAttributes(parentNode *TreeNode, attrs map[string]interface{}, unknownAttrs map[string]interface{}, depth int, prefix string) {
+func processAttributes(parentNode *TreeNode, beforeAttrs map[string]interface{}, afterAttrs map[string]interface{}, unknownAttrs map[string]interface{}, depth int, prefix string) {
 	// Sort keys for consistent output
 	var keys []string
-	for k := range attrs {
+
+	// Collect all keys from both before and after
+	keyMap := make(map[string]bool)
+
+	for k := range beforeAttrs {
+		keyMap[k] = true
+	}
+
+	for k := range afterAttrs {
+		keyMap[k] = true
+	}
+
+	for k := range keyMap {
 		keys = append(keys, k)
 	}
+
 	sort.Strings(keys)
 
+	// Track hidden attributes for summary
+	var hiddenCount int
+	var childNodes []*TreeNode // Temporary storage for child nodes
+
 	for _, key := range keys {
-		value := attrs[key]
+		beforeValue, beforeExists := beforeAttrs[key]
+		afterValue, afterExists := afterAttrs[key]
 		unknown := false
 
 		// Check if the value is known or will be known after apply
@@ -818,47 +902,135 @@ func processAttributes(parentNode *TreeNode, attrs map[string]interface{}, unkno
 			}
 		}
 
+		// Determine the change type for this attribute
+		var attrPrefix string
+		var changeType string
+
+		if unknown {
+			// Handle unknown values
+			if !beforeExists {
+				// New attribute with unknown value
+				attrPrefix = "+ "
+				changeType = "create"
+			} else {
+				// Existing attribute with unknown new value
+				attrPrefix = "~ "
+				changeType = "update"
+			}
+		} else if !beforeExists && afterExists {
+			// New attribute
+			attrPrefix = "+ "
+			changeType = "create"
+		} else if beforeExists && !afterExists {
+			// Deleted attribute
+			attrPrefix = "- "
+			changeType = "delete"
+		} else if beforeExists && afterExists && afterValue == nil {
+			// Changed to null - mark as deleted
+			attrPrefix = "- "
+			changeType = "delete"
+		} else if beforeExists && afterExists && !isEffectivelyEqual(beforeValue, afterValue) {
+			// Changed attribute
+			attrPrefix = "~ "
+			changeType = "update"
+		} else {
+			// Unchanged
+			attrPrefix = "  "
+			changeType = "no-op"
+
+			// Skip processing unchanged attributes unless parent is being created/deleted
+			if parentNode.ChangeType != "create" && parentNode.ChangeType != "delete" && parentNode.ChangeType != "replace" {
+				hiddenCount++
+				continue
+			}
+		}
+
+		// Override prefix if parent node is being created or deleted
+		if parentNode.ChangeType == "create" {
+			attrPrefix = "+ "
+			changeType = "create"
+		} else if parentNode.ChangeType == "delete" {
+			attrPrefix = "- "
+			changeType = "delete"
+		} else if parentNode.ChangeType == "replace" {
+			if attrPrefix == "  " {
+				// If attribute is unchanged in a replacement, show it normally
+				attrPrefix = "  "
+
+				// Skip processing unchanged attributes in replacements too
+				hiddenCount++
+				continue
+			} else {
+				// Otherwise show appropriate change symbol
+				// Keep the attrPrefix as is
+			}
+		}
+
+		// Use the value from the side that exists, preferring after
+		var value interface{}
+		if afterExists {
+			value = afterValue
+		} else {
+			value = beforeValue
+		}
+
+		// Skip processing if both values are nil and not unknown
+		if value == nil && !unknown && changeType == "no-op" {
+			hiddenCount++
+			continue
+		}
+
 		switch v := value.(type) {
 		case map[string]interface{}:
+			// Get before/after maps for this nested object
+			var beforeMap map[string]interface{}
+			var afterMap map[string]interface{}
+
+			if beforeVal, ok := beforeValue.(map[string]interface{}); ok {
+				beforeMap = beforeVal
+			} else {
+				beforeMap = make(map[string]interface{})
+			}
+
+			if afterVal, ok := afterValue.(map[string]interface{}); ok {
+				afterMap = afterVal
+			} else {
+				afterMap = make(map[string]interface{})
+			}
+
 			// For labels and specific map types, format as inline
 			if key == "terraform_labels" || key == "effective_labels" || key == "labels" || key == "tags" {
 				blockNode := &TreeNode{
-					Text:       prefix + " " + key + " = {",
+					Text:       attrPrefix + key + " = {",
 					Expanded:   false,
 					Type:       "block",
 					Depth:      depth,
 					Parent:     parentNode,
 					Toggleable: true,
+					ChangeType: changeType,
 				}
 
-				parentNode.Children = append(parentNode.Children, blockNode)
+				childNodes = append(childNodes, blockNode)
 
 				// Format map entries properly
-				formatMapEntries(blockNode, v, depth+1, prefix)
+				formatMapEntries(blockNode, v, depth+1, attrPrefix)
 
 				// Add closing brace
-				closingNode := &TreeNode{
-					Text:       "}",
-					Expanded:   true,
-					Type:       "attribute",
-					Depth:      depth,
-					Parent:     parentNode,
-					Toggleable: false,
-				}
-
-				parentNode.Children = append(parentNode.Children, closingNode)
+				closingNode := createClosingBrace(depth, blockNode)
+				childNodes = append(childNodes, closingNode)
 			} else {
 				// This is a nested block
 				blockNode := &TreeNode{
-					Text:       prefix + " " + key + " {",
+					Text:       attrPrefix + key + " {",
 					Expanded:   false,
 					Type:       "block",
 					Depth:      depth,
 					Parent:     parentNode,
 					Toggleable: true,
+					ChangeType: changeType,
 				}
 
-				parentNode.Children = append(parentNode.Children, blockNode)
+				childNodes = append(childNodes, blockNode)
 
 				// Process nested attributes
 				var nestedUnknown map[string]interface{}
@@ -868,53 +1040,141 @@ func processAttributes(parentNode *TreeNode, attrs map[string]interface{}, unkno
 					}
 				}
 
-				processAttributes(blockNode, v, nestedUnknown, depth+1, prefix)
-
-				// Add closing brace
-				closingNode := &TreeNode{
-					Text:       "}",
-					Expanded:   true,
-					Type:       "attribute",
-					Depth:      depth,
-					Parent:     parentNode,
-					Toggleable: false,
+				// Track if this block has any changes
+				tempParent := &TreeNode{
+					ChangeType: changeType,
 				}
 
-				parentNode.Children = append(parentNode.Children, closingNode)
+				// Recursive call with before and after maps for this block
+				processAttributes(tempParent, beforeMap, afterMap, nestedUnknown, depth+1, attrPrefix)
+
+				// Check if the block has any real changes or just hidden attributes
+				hasChanges := false
+				hasHiddenMessage := false
+
+				for _, child := range tempParent.Children {
+					if strings.HasPrefix(child.Text, "#") && strings.Contains(child.Text, "unchanged") {
+						hasHiddenMessage = true
+					} else if child.ChangeType != "no-op" || strings.HasPrefix(child.Text, "+") || strings.HasPrefix(child.Text, "-") || strings.HasPrefix(child.Text, "~") {
+						hasChanges = true
+					}
+				}
+
+				// If the block has changes or we're showing everything, add all children
+				if hasChanges || parentNode.ChangeType == "create" || parentNode.ChangeType == "delete" || parentNode.ChangeType == "replace" {
+					blockNode.Children = tempParent.Children
+
+					// Add closing brace
+					closingNode := createClosingBrace(depth, blockNode)
+					childNodes = append(childNodes, closingNode)
+				} else if hasHiddenMessage {
+					// If there are only hidden attributes, don't show the block
+					hiddenCount++
+					childNodes = childNodes[:len(childNodes)-1] // Remove the block node
+				} else {
+					// Empty block with no changes, skip it
+					hiddenCount++
+					childNodes = childNodes[:len(childNodes)-1] // Remove the block node
+				}
 			}
 
 		case []interface{}:
-			// This is a list of items
+			// Handle arrays/lists
 			if len(v) > 0 {
-				blockNode := &TreeNode{
-					Text:       prefix + " " + key + " {",
-					Expanded:   false,
-					Type:       "block",
-					Depth:      depth,
-					Parent:     parentNode,
-					Toggleable: true,
+				// Get before/after arrays for this list
+				var beforeList []interface{}
+				var afterList []interface{}
+
+				if beforeVal, ok := beforeValue.([]interface{}); ok {
+					beforeList = beforeVal
+				} else {
+					beforeList = []interface{}{}
 				}
 
-				parentNode.Children = append(parentNode.Children, blockNode)
+				if afterVal, ok := afterValue.([]interface{}); ok {
+					afterList = afterVal
+				} else {
+					afterList = []interface{}{}
+				}
 
 				// Process each item in the list
-				for i, item := range v {
-					if mapItem, ok := item.(map[string]interface{}); ok {
+				maxLen := len(afterList)
+				if len(beforeList) > maxLen {
+					maxLen = len(beforeList)
+				}
+
+				var hiddenItems int
+				var listItems []*TreeNode
+
+				for i := 0; i < maxLen; i++ {
+					var beforeItem, afterItem interface{}
+					var itemChangeType string
+					var itemPrefix string
+
+					if i < len(beforeList) {
+						beforeItem = beforeList[i]
+					}
+
+					if i < len(afterList) {
+						afterItem = afterList[i]
+					}
+
+					// Determine change type for this list item
+					if beforeItem == nil && afterItem != nil {
+						itemChangeType = "create"
+						itemPrefix = "+ "
+					} else if beforeItem != nil && afterItem == nil {
+						itemChangeType = "delete"
+						itemPrefix = "- "
+					} else if beforeItem != nil && afterItem != nil && !isEffectivelyEqual(beforeItem, afterItem) {
+						itemChangeType = "update"
+						itemPrefix = "~ "
+					} else {
+						itemChangeType = "no-op"
+						itemPrefix = "  "
+					}
+
+					// Override prefix if parent node is being created or deleted
+					if parentNode.ChangeType == "create" {
+						itemPrefix = "+ "
+						itemChangeType = "create"
+					} else if parentNode.ChangeType == "delete" {
+						itemPrefix = "- "
+						itemChangeType = "delete"
+					}
+
+					// Skip unchanged items unless we're showing everything
+					if itemChangeType == "no-op" && parentNode.ChangeType != "create" && parentNode.ChangeType != "delete" && parentNode.ChangeType != "replace" {
+						hiddenItems++
+						continue
+					}
+
+					// Use the item that exists, preferring after
+					var item interface{}
+					if i < len(afterList) {
+						item = afterList[i]
+					} else {
+						item = beforeList[i]
+					}
+
+					if _, ok := item.(map[string]interface{}); ok {
 						// For maps in a list, process as nested blocks
+						// Create node and add directly to parent instead of to blockNode
 						itemNode := &TreeNode{
-							Text:       prefix + " [" + strconv.Itoa(i) + "] {",
+							Text:       itemPrefix + key + "[" + strconv.Itoa(i) + "] {",
 							Expanded:   false,
 							Type:       "block",
-							Depth:      depth + 1,
-							Parent:     blockNode,
+							Depth:      depth,
+							Parent:     parentNode,
 							Toggleable: true,
+							ChangeType: itemChangeType,
 						}
 
-						blockNode.Children = append(blockNode.Children, itemNode)
+						listItems = append(listItems, itemNode)
 
 						// Handle nested unknown values
 						var nestedUnknown map[string]interface{}
-						if unknownAttrs != nil && i < len(v) {
+						if unknownAttrs != nil && i < len(afterList) {
 							if unknownList, exists := unknownAttrs[key].([]interface{}); exists && i < len(unknownList) {
 								if unknownMap, ok := unknownList[i].(map[string]interface{}); ok {
 									nestedUnknown = unknownMap
@@ -922,70 +1182,117 @@ func processAttributes(parentNode *TreeNode, attrs map[string]interface{}, unkno
 							}
 						}
 
-						processAttributes(itemNode, mapItem, nestedUnknown, depth+2, prefix)
+						// Get before/after maps for this list item
+						var beforeItemMap map[string]interface{}
+						var afterItemMap map[string]interface{}
+
+						if i < len(beforeList) {
+							if beforeMapItem, ok := beforeList[i].(map[string]interface{}); ok {
+								beforeItemMap = beforeMapItem
+							} else {
+								beforeItemMap = make(map[string]interface{})
+							}
+						} else {
+							beforeItemMap = make(map[string]interface{})
+						}
+
+						if i < len(afterList) {
+							if afterMapItem, ok := afterList[i].(map[string]interface{}); ok {
+								afterItemMap = afterMapItem
+							} else {
+								afterItemMap = make(map[string]interface{})
+							}
+						} else {
+							afterItemMap = make(map[string]interface{})
+						}
+
+						// Recursive call with before/after for this list item
+						processAttributes(itemNode, beforeItemMap, afterItemMap, nestedUnknown, depth+1, itemPrefix)
 
 						// Add closing brace
-						itemClosingNode := &TreeNode{
-							Text:       "}",
-							Expanded:   true,
-							Type:       "attribute",
-							Depth:      depth + 1,
-							Parent:     blockNode,
-							Toggleable: false,
+						itemClosingNode := createClosingBrace(depth, itemNode)
+						listItems = append(listItems, itemClosingNode)
+					} else {
+						// Simple value in list - we'll keep the traditional structure for simple lists
+						// Create a container for the list
+						listNode := &TreeNode{
+							Text:       attrPrefix + key + " {",
+							Expanded:   false,
+							Type:       "block",
+							Depth:      depth,
+							Parent:     parentNode,
+							Toggleable: true,
+							ChangeType: changeType,
 						}
 
-						blockNode.Children = append(blockNode.Children, itemClosingNode)
-					} else {
-						// Simple value in list
+						childNodes = append(childNodes, listNode)
+
+						// Add the list item
 						valueText := fmt.Sprintf("%v", item)
 						listItemNode := &TreeNode{
-							Text:       prefix + " " + valueText,
+							Text:       itemPrefix + valueText,
 							Expanded:   true,
 							Type:       "attribute",
 							Depth:      depth + 1,
-							Parent:     blockNode,
+							Parent:     listNode,
 							Toggleable: false,
+							ChangeType: itemChangeType,
 						}
 
-						blockNode.Children = append(blockNode.Children, listItemNode)
+						listNode.Children = append(listNode.Children, listItemNode)
+
+						// Add closing brace for simple list
+						listClosingNode := createClosingBrace(depth, listNode)
+						childNodes = append(childNodes, listClosingNode)
+
+						// We've handled the list differently, so return from this function
+						return
 					}
 				}
 
-				// Add closing brace for the list
-				closingNode := &TreeNode{
-					Text:       "}",
-					Expanded:   true,
-					Type:       "attribute",
-					Depth:      depth,
-					Parent:     parentNode,
-					Toggleable: false,
+				// Add hidden items message if any
+				if hiddenItems > 0 {
+					hiddenNode := &TreeNode{
+						Text:       "# (" + strconv.Itoa(hiddenItems) + " unchanged items hidden)",
+						Expanded:   true,
+						Type:       "comment",
+						Depth:      depth,
+						Parent:     parentNode,
+						Toggleable: false,
+						ChangeType: "no-op",
+					}
+
+					listItems = append(listItems, hiddenNode)
 				}
 
-				parentNode.Children = append(parentNode.Children, closingNode)
+				// Add all list items directly to parent
+				childNodes = append(childNodes, listItems...)
 			} else if unknown {
 				// Empty list that will be known after apply
 				attributeNode := &TreeNode{
-					Text:       prefix + " " + key + " = (known after apply)",
+					Text:       attrPrefix + key + " = (known after apply)",
 					Expanded:   true,
 					Type:       "attribute",
 					Depth:      depth,
 					Parent:     parentNode,
 					Toggleable: false,
+					ChangeType: changeType,
 				}
 
-				parentNode.Children = append(parentNode.Children, attributeNode)
+				childNodes = append(childNodes, attributeNode)
 			} else {
 				// Empty list with known values (empty list)
 				attributeNode := &TreeNode{
-					Text:       prefix + " " + key + " = []",
+					Text:       attrPrefix + key + " = []",
 					Expanded:   true,
 					Type:       "attribute",
 					Depth:      depth,
 					Parent:     parentNode,
 					Toggleable: false,
+					ChangeType: changeType,
 				}
 
-				parentNode.Children = append(parentNode.Children, attributeNode)
+				childNodes = append(childNodes, attributeNode)
 			}
 
 		default:
@@ -1004,47 +1311,106 @@ func processAttributes(parentNode *TreeNode, attrs map[string]interface{}, unkno
 				}
 			}
 
+			// For updated values, show both before and after
+			if changeType == "update" && beforeExists {
+				if unknown {
+					// For unknown updates, show "value -> (known after apply)"
+					beforeText := "null"
+					if beforeValue != nil {
+						beforeText = fmt.Sprintf("%v", beforeValue)
+						if _, ok := beforeValue.(string); ok {
+							beforeText = "\"" + beforeText + "\""
+						}
+					}
+					valueText = beforeText + " -> " + valueText
+				} else if afterExists {
+					// Normal updates
+					beforeText := "null"
+					if beforeValue != nil {
+						beforeText = fmt.Sprintf("%v", beforeValue)
+						if _, ok := beforeValue.(string); ok {
+							beforeText = "\"" + beforeText + "\""
+						}
+					}
+					valueText = beforeText + " -> " + valueText
+				}
+			} else if changeType == "delete" && beforeExists {
+				// For deleted values, show "value -> null"
+				beforeText := "null"
+				if beforeValue != nil {
+					beforeText = fmt.Sprintf("%v", beforeValue)
+					if _, ok := beforeValue.(string); ok {
+						beforeText = "\"" + beforeText + "\""
+					}
+				}
+
+				valueText = beforeText + " -> null"
+			}
+
 			attributeNode := &TreeNode{
-				Text:       prefix + " " + key + " = " + valueText,
+				Text:       attrPrefix + key + " = " + valueText,
 				Expanded:   true,
 				Type:       "attribute",
 				Depth:      depth,
 				Parent:     parentNode,
 				Toggleable: false,
+				ChangeType: changeType,
 			}
 
-			parentNode.Children = append(parentNode.Children, attributeNode)
+			childNodes = append(childNodes, attributeNode)
 		}
 	}
+
+	// Add hidden attributes message if any
+	if hiddenCount > 0 {
+		hiddenNode := &TreeNode{
+			Text:       "# (" + strconv.Itoa(hiddenCount) + " unchanged attributes hidden)",
+			Expanded:   true,
+			Type:       "comment",
+			Depth:      depth,
+			Parent:     parentNode,
+			Toggleable: false,
+			ChangeType: "no-op",
+		}
+
+		childNodes = append(childNodes, hiddenNode)
+	}
+
+	// Add all child nodes to parent
+	parentNode.Children = append(parentNode.Children, childNodes...)
 
 	// Add any unknown attributes that aren't in the original map
 	if unknownAttrs != nil {
 		for k, v := range unknownAttrs {
-			if _, exists := attrs[k]; !exists {
-				// Only process true boolean unknowns that don't exist in attrs
-				if boolVal, ok := v.(bool); ok && boolVal {
-					attributeNode := &TreeNode{
-						Text:       prefix + " " + k + " = (known after apply)",
-						Expanded:   true,
-						Type:       "attribute",
-						Depth:      depth,
-						Parent:     parentNode,
-						Toggleable: false,
-					}
+			if _, existsInBefore := beforeAttrs[k]; !existsInBefore {
+				if _, existsInAfter := afterAttrs[k]; !existsInAfter {
+					// Only process true boolean unknowns that don't exist in attrs
+					if boolVal, ok := v.(bool); ok && boolVal {
+						attributeNode := &TreeNode{
+							Text:       "+ " + k + " = (known after apply)",
+							Expanded:   true,
+							Type:       "attribute",
+							Depth:      depth,
+							Parent:     parentNode,
+							Toggleable: false,
+							ChangeType: "create",
+						}
 
-					parentNode.Children = append(parentNode.Children, attributeNode)
-				} else if mapVal, ok := v.(map[string]interface{}); ok && len(mapVal) > 0 {
-					// This is a block that exists only in unknown
-					blockNode := &TreeNode{
-						Text:       prefix + " " + k + " (known after apply)",
-						Expanded:   false,
-						Type:       "block",
-						Depth:      depth,
-						Parent:     parentNode,
-						Toggleable: true,
-					}
+						parentNode.Children = append(parentNode.Children, attributeNode)
+					} else if mapVal, ok := v.(map[string]interface{}); ok && len(mapVal) > 0 {
+						// This is a block that exists only in unknown
+						blockNode := &TreeNode{
+							Text:       "+ " + k + " (known after apply)",
+							Expanded:   false,
+							Type:       "block",
+							Depth:      depth,
+							Parent:     parentNode,
+							Toggleable: true,
+							ChangeType: "create",
+						}
 
-					parentNode.Children = append(parentNode.Children, blockNode)
+						parentNode.Children = append(parentNode.Children, blockNode)
+					}
 				}
 			}
 		}
@@ -1062,23 +1428,49 @@ func formatMapEntries(parentNode *TreeNode, mapData map[string]interface{}, dept
 
 	for _, key := range keys {
 		value := mapData[key]
-		valueText := fmt.Sprintf("%v", value)
 
-		// Add quotes for string values
-		if _, ok := value.(string); ok {
-			valueText = "\"" + valueText + "\""
+		var valueText string
+		if value == nil {
+			valueText = "null"
+		} else {
+			valueText = fmt.Sprintf("%v", value)
+			// Add quotes for string values
+			if _, ok := value.(string); ok {
+				valueText = "\"" + valueText + "\""
+			}
 		}
 
-		entryNode := &TreeNode{
-			Text:       prefix + " \"" + key + "\" = " + valueText,
+		// Determine the appropriate prefix for this entry based on parent's changeType
+		entryPrefix := prefix
+		entryChangeType := parentNode.ChangeType
+
+		// Ensure we use correct change type and prefix for map entries
+		switch parentNode.ChangeType {
+		case "create":
+			entryPrefix = "+ "
+			entryChangeType = "create"
+		case "delete":
+			entryPrefix = "- "
+			entryChangeType = "delete"
+		case "update":
+			entryPrefix = "~ "
+			entryChangeType = "update"
+		case "replace":
+			entryPrefix = "~ "
+			entryChangeType = "update"
+		}
+
+		attributeNode := &TreeNode{
+			Text:       entryPrefix + key + " = " + valueText,
 			Expanded:   true,
 			Type:       "attribute",
 			Depth:      depth,
 			Parent:     parentNode,
 			Toggleable: false,
+			ChangeType: entryChangeType, // Use the determined change type, not just parent's
 		}
 
-		parentNode.Children = append(parentNode.Children, entryNode)
+		parentNode.Children = append(parentNode.Children, attributeNode)
 	}
 }
 
@@ -1252,4 +1644,77 @@ func flattenNodes(nodes []*TreeNode) []*TreeNode {
 	}
 
 	return result
+}
+
+// createClosingBrace creates a closing brace node with consistent type and formatting
+func createClosingBrace(depth int, parent *TreeNode) *TreeNode {
+	return &TreeNode{
+		Text:       "}",
+		Expanded:   true,
+		Type:       "closing_brace",
+		Depth:      depth,
+		Parent:     parent,
+		Toggleable: false,
+		ChangeType: "no-op",
+	}
+}
+
+// isEffectivelyEqual compares two values and determines if they're effectively equal
+// This handles special cases like empty strings, empty maps, and nulls
+func isEffectivelyEqual(a, b interface{}) bool {
+	// If both are nil or exactly equal, they're equal
+	if a == nil && b == nil {
+		return true
+	}
+	if reflect.DeepEqual(a, b) {
+		return true
+	}
+
+	// Check if one is nil and the other is an empty string
+	aStr, aIsStr := a.(string)
+	if aIsStr && b == nil && aStr == "" {
+		return true
+	}
+
+	bStr, bIsStr := b.(string)
+	if bIsStr && a == nil && bStr == "" {
+		return true
+	}
+
+	// Check for empty strings
+	if aIsStr && bIsStr && (aStr == "" && bStr == "") {
+		return true
+	}
+
+	// Check for empty maps
+	aMap, aIsMap := a.(map[string]interface{})
+	bMap, bIsMap := b.(map[string]interface{})
+	if aIsMap && bIsMap && (len(aMap) == 0 && len(bMap) == 0) {
+		return true
+	}
+
+	// Map to nil comparison
+	if aIsMap && b == nil && len(aMap) == 0 {
+		return true
+	}
+	if bIsMap && a == nil && len(bMap) == 0 {
+		return true
+	}
+
+	// Check for empty arrays
+	aSlice, aIsSlice := a.([]interface{})
+	bSlice, bIsSlice := b.([]interface{})
+	if aIsSlice && bIsSlice && (len(aSlice) == 0 && len(bSlice) == 0) {
+		return true
+	}
+
+	// Array to nil comparison
+	if aIsSlice && b == nil && len(aSlice) == 0 {
+		return true
+	}
+	if bIsSlice && a == nil && len(bSlice) == 0 {
+		return true
+	}
+
+	return false
 }
