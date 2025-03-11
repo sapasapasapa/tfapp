@@ -4,6 +4,7 @@ package plan
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"tfapp/internal/ui"
@@ -32,6 +33,7 @@ type Model struct {
 	cursor           int         // Current cursor position
 	windowTop        int         // The top line of the window being displayed
 	windowHeight     int         // Height of visible window
+	terminalWidth    int         // Width of the terminal window for text wrapping
 	quitting         bool        // Whether the user is quitting
 	ready            bool        // Whether we've received the window size yet
 	showHelp         bool        // Whether to show the help tooltip
@@ -62,6 +64,7 @@ func New(planOutput string) Model {
 		cursor:           0,
 		windowTop:        0,
 		windowHeight:     25, // Show approximately 25 lines at a time for better visibility
+		terminalWidth:    80, // Default terminal width
 		quitting:         false,
 		ready:            false,
 		showHelp:         false,
@@ -92,6 +95,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.windowHeight < 5 {
 			m.windowHeight = 5 // Minimum reasonable height
 		}
+
+		// Store terminal width for text wrapping
+		m.terminalWidth = msg.Width
 
 		// Mark as ready now that we've received window dimensions
 		m.ready = true
@@ -426,6 +432,12 @@ func (m Model) View() string {
 		contentEnd = totalNodes
 	}
 
+	// Calculate effective width for text wrapping (accounting for cursor and some buffer)
+	effectiveWidth := m.terminalWidth - 2 // Account for cursor space
+	if effectiveWidth < 20 {
+		effectiveWidth = 20 // Minimum reasonable width
+	}
+
 	// Render visible nodes
 	for i := start; i < contentEnd; i++ {
 		node := visibleNodes[i]
@@ -534,8 +546,11 @@ func (m Model) View() string {
 				Render(colorized)
 		}
 
+		// Apply text wrapping to handle long lines
+		wrappedText := wrapText(colorized, effectiveWidth, indent)
+
 		// Write the line to output
-		sb.WriteString(cursor + colorized + "\n")
+		sb.WriteString(cursor + wrappedText + "\n")
 	}
 
 	// Calculate the percentage
@@ -1001,4 +1016,82 @@ func isEffectivelyEqual(a, b interface{}) bool {
 	}
 
 	return false
+}
+
+// wrapText wraps text at the specified width while preserving ANSI color codes
+// and maintaining proper indentation for wrapped lines.
+func wrapText(text string, width int, indentStr string) string {
+	if width <= 0 {
+		return text // No wrapping needed
+	}
+
+	// Find all ANSI color codes in the text
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	ansiMatches := ansiRegex.FindAllStringIndex(text, -1)
+
+	// If there are no ANSI codes or the text is shorter than width, return as is
+	if len(ansiMatches) == 0 && len(text) <= width {
+		return text
+	}
+
+	var result strings.Builder
+	var currentLine strings.Builder
+	var activeColorCode string
+	var visualLength int
+
+	// Process the text character by character
+	for i := 0; i < len(text); i++ {
+		// Check if current position is the start of an ANSI code
+		isAnsiStart := false
+		for _, match := range ansiMatches {
+			if i == match[0] {
+				// Extract the ANSI code
+				ansiCode := text[match[0]:match[1]]
+				currentLine.WriteString(ansiCode)
+
+				// Store the active color code if it's a color code
+				if !strings.Contains(ansiCode, "[0m") { // If not a reset code
+					activeColorCode = ansiCode
+				} else {
+					activeColorCode = ""
+				}
+
+				// Skip to the end of the ANSI code
+				i = match[1] - 1
+				isAnsiStart = true
+				break
+			}
+		}
+
+		if isAnsiStart {
+			continue
+		}
+
+		// Add the current character
+		currentLine.WriteByte(text[i])
+		visualLength++
+
+		// Check if we need to wrap
+		if visualLength >= width && i < len(text)-1 {
+			// Write the current line to the result
+			result.WriteString(currentLine.String())
+			result.WriteString("\n")
+
+			// Start a new line with proper indentation and active color code
+			currentLine.Reset()
+			currentLine.WriteString(indentStr + "  ") // Additional indentation for wrapped lines
+			if activeColorCode != "" {
+				currentLine.WriteString(activeColorCode)
+			}
+
+			visualLength = 0
+		}
+	}
+
+	// Add the last line if there's anything left
+	if currentLine.Len() > 0 {
+		result.WriteString(currentLine.String())
+	}
+
+	return result.String()
 }
