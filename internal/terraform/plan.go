@@ -114,6 +114,20 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 		os.Exit(0)
 	}
 
+	changing := false
+	for _, resource := range plan.ResourceChanges {
+		if len(resource.Change.Actions) > 0 && resource.Change.Actions[0] != "no-op" {
+			changing = true
+			break
+		}
+	}
+
+	if !changing {
+		fmt.Printf("%s%sNo changes detected in plan. Your infrastructure is up-to-date.%s\n",
+			ui.ColorInfo, ui.TextBold, ui.ColorReset)
+		os.Exit(0)
+	}
+
 	fmt.Println("\nSummary of proposed changes:")
 
 	// Count actions for summary
