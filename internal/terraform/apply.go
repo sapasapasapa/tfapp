@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"tfapp/internal/models"
 	"tfapp/internal/ui"
@@ -17,9 +18,23 @@ type ApplyManager struct {
 
 // NewApplyManager creates a new Terraform apply manager.
 func NewApplyManager(executor models.Executor) *ApplyManager {
-	return &ApplyManager{
+	// Register progress callback with the executor if it's a CommandExecutor
+	applyManager := &ApplyManager{
 		executor: executor,
 	}
+
+	// Try to register progress callback if the executor supports it
+	if cmdExecutor, ok := executor.(*CommandExecutor); ok {
+		cmdExecutor.RegisterProgressCallback(applyManager.displayProgress)
+	}
+
+	return applyManager
+}
+
+// displayProgress outputs progress updates to the user
+func (a *ApplyManager) displayProgress(status string) {
+	timestamp := time.Now().Format("15:04:05")
+	fmt.Printf("%s[%s] %s%s\n", ui.ColorHighlight, timestamp, status, ui.ColorReset)
 }
 
 // Apply executes `terraform apply` with the given plan file.
@@ -34,6 +49,9 @@ func (a *ApplyManager) Apply(ctx interface{}, planFilePath string) error {
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response == "yes" {
+		fmt.Printf("%sStarting terraform apply operation...%s\n", ui.ColorInfo, ui.ColorReset)
+		fmt.Printf("%sThis may take several minutes. Progress updates will be displayed.%s\n", ui.ColorInfo, ui.ColorReset)
+
 		if err := a.executor.RunCommand(ctx, []string{"apply", planFilePath}, "Applying terraform plan", false); err != nil {
 			return fmt.Errorf("error executing terraform apply: %w", err)
 		}
@@ -67,6 +85,9 @@ func (a *ApplyManager) ApplyTargets(ctx interface{}, targets []string) error {
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response == "yes" {
+		fmt.Printf("%sStarting targeted terraform apply operation...%s\n", ui.ColorInfo, ui.ColorReset)
+		fmt.Printf("%sThis may take several minutes. Progress updates will be displayed.%s\n", ui.ColorInfo, ui.ColorReset)
+
 		if err := a.executor.RunCommand(ctx, args, "Applying terraform to selected resources", false); err != nil {
 			return fmt.Errorf("error executing targeted terraform apply: %w", err)
 		}
@@ -90,6 +111,8 @@ func (a *ApplyManager) Init(ctx interface{}, upgrade bool) error {
 
 // initOnly runs a basic terraform init.
 func (a *ApplyManager) initOnly(ctx interface{}) error {
+	fmt.Printf("%sStarting terraform init...%s\n", ui.ColorInfo, ui.ColorReset)
+
 	if err := a.executor.RunCommand(ctx, []string{"init"}, "Running terraform init...", false); err != nil {
 		return fmt.Errorf("error executing terraform init: %w", err)
 	}
@@ -113,6 +136,8 @@ func (a *ApplyManager) initUpgrade(ctx interface{}) error {
 
 	response = strings.ToLower(strings.TrimSpace(response))
 	if response == "yes" {
+		fmt.Printf("%sStarting terraform init with upgrade...%s\n", ui.ColorInfo, ui.ColorReset)
+
 		if err := a.executor.RunCommand(ctx, []string{"init", "-upgrade"}, "Running terraform init -upgrade...", false); err != nil {
 			return fmt.Errorf("error executing terraform init -upgrade: %w", err)
 		}
