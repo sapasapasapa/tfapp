@@ -124,7 +124,6 @@ func (e *CommandExecutor) RunCommand(ctx interface{}, args []string, spinnerMsg 
 	s.Start()
 
 	// Start the command
-	e.notifyProgress(fmt.Sprintf("Starting terraform %s", strings.Join(args, " ")))
 	err = cmd.Start()
 	if err != nil {
 		s.Stop()
@@ -134,7 +133,7 @@ func (e *CommandExecutor) RunCommand(ctx interface{}, args []string, spinnerMsg 
 	// Start a goroutine to periodically update the spinner message with status
 	statusCtx, statusCancel := context.WithCancel(ctxTyped)
 	go func() {
-		ticker := time.NewTicker(3 * time.Second)
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		counter := 0
 		for {
@@ -143,7 +142,7 @@ func (e *CommandExecutor) RunCommand(ctx interface{}, args []string, spinnerMsg 
 				return
 			case <-ticker.C:
 				counter++
-				s.UpdateMessage(fmt.Sprintf("%s (running for %ds)", spinnerMsg, counter*3))
+				s.UpdateMessage(fmt.Sprintf("%s (running for %ds)", spinnerMsg, counter*5))
 			}
 		}
 	}()
@@ -176,7 +175,6 @@ func (e *CommandExecutor) RunCommand(ctx interface{}, args []string, spinnerMsg 
 		return cmdErr
 	}
 
-	e.notifyProgress("Command completed successfully")
 	return nil
 }
 
@@ -186,10 +184,14 @@ func (e *CommandExecutor) processOutputForProgress(reader io.Reader, source stri
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Look for specific Terraform progress indicators
-		if strings.Contains(line, "Plan:") ||
-			strings.Contains(line, "Apply complete!") ||
-			strings.Contains(line, "Terraform will perform the following actions") ||
+		// Skip the redundant lines that we don't want to show
+		if strings.Contains(line, "Terraform will perform the following actions") ||
+			strings.Contains(line, "Plan:") {
+			continue
+		}
+
+		// Look for specific Terraform progress indicators we want to show
+		if strings.Contains(line, "Apply complete!") ||
 			strings.Contains(line, "Preparing the remote plan") ||
 			strings.Contains(line, "Executing plan:") ||
 			strings.Contains(line, "Still creating...") ||

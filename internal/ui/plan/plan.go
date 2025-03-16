@@ -2,9 +2,11 @@
 package plan
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 
 	"tfapp/internal/ui"
@@ -15,15 +17,18 @@ import (
 
 // TreeNode represents a node in the plan's resource tree.
 type TreeNode struct {
-	Text       string      // The text content of this node
-	Children   []*TreeNode // Child nodes (nested blocks)
-	Parent     *TreeNode   // Parent node (nil for root)
-	Depth      int         // Depth in the tree
-	Expanded   bool        // Whether this node is expanded
-	Type       string      // Type of node (resource, block, attribute)
-	IsRoot     bool        // Whether this is a root node
-	Toggleable bool        // Whether this node can be expanded/collapsed
-	ChangeType string      // Type of change (create, update, delete, replace)
+	Text            string      // The text content of this node
+	Children        []*TreeNode // Child nodes (nested blocks)
+	Parent          *TreeNode   // Parent node (nil for root)
+	Depth           int         // Depth in the tree
+	Expanded        bool        // Whether this node is expanded
+	Type            string      // Type of node (resource, block, attribute)
+	IsRoot          bool        // Whether this is a root node
+	Toggleable      bool        // Whether this node can be expanded/collapsed
+	ChangeType      string      // Type of change (create, update, delete, replace)
+	PreviousAddress string      // Previous address for moved resources
+	IsDrifted       bool        // Whether this resource has drifted
+	ActionReason    string      // Reason for the action (e.g., tainted)
 }
 
 // Model represents the state of the plan viewer.
@@ -48,10 +53,17 @@ type Model struct {
 func New(planOutput string) Model {
 	nodes := parsePlan(planOutput)
 
-	// Set all resource nodes to expanded by default
+	// Set only the root section nodes to expanded by default, collapse all others
 	for _, node := range nodes {
-		if node.Type == "resource" {
+		if node.Type == "section" || node.IsRoot {
 			node.Expanded = true
+		} else {
+			node.Expanded = false
+		}
+
+		// Collapse all children
+		for _, child := range node.Children {
+			collapseAllNodes(child)
 		}
 	}
 
@@ -257,7 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// First, search from cursor to end
 					found := false
 					for i := startPos; i < len(visibleNodes); i++ {
-						if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+						if isRootResource(visibleNodes[i]) {
 							m.cursor = i
 							found = true
 							break
@@ -267,7 +279,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// If not found and we started after position 0, search from beginning to cursor
 					if !found && startPos > 0 {
 						for i := 0; i < startPos; i++ {
-							if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+							if isRootResource(visibleNodes[i]) {
 								m.cursor = i
 								found = true
 								break
@@ -292,7 +304,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// First, search from cursor to beginning
 					found := false
 					for i := startPos; i >= 0; i-- {
-						if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+						if isRootResource(visibleNodes[i]) {
 							m.cursor = i
 							found = true
 							break
@@ -302,7 +314,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// If not found and we started before the end, search from end to cursor
 					if !found && startPos < len(visibleNodes)-1 {
 						for i := len(visibleNodes) - 1; i > startPos; i-- {
-							if visibleNodes[i].Type == "resource" && visibleNodes[i].Depth == 0 {
+							if isRootResource(visibleNodes[i]) {
 								m.cursor = i
 								found = true
 								break
@@ -449,6 +461,11 @@ func (m Model) View() string {
 			}
 		}
 
+		// For section headers, don't show expansion indicators
+		if node.Type == "section_header" || node.Type == "header" {
+			expandChar = "  "
+		}
+
 		// Style the line based on node type
 		var line string
 		if m.searchMode && m.searchString != "" {
@@ -480,14 +497,41 @@ func (m Model) View() string {
 
 		// Apply custom colorization based on node type
 		var colorized string
-		if node.Type == "resource" {
+
+		// Special handling for different node types
+		if node.Type == "header" {
+			// Apply bold formatting and background color to main header
+			colorized = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#4a2a8a")). // Purple background for main header
+				Render(line)
+		} else if node.Type == "section_header" {
+			// Use highlight color for all section headers
+			colorized = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color(ui.GetHexColorByName("highlight"))).
+				Render(line)
+		} else if node.IsDrifted {
+			// Apply drift color only to the "has drifted" phrase
+			if strings.Contains(line, "has drifted") {
+				// Split the line at "has drifted" to color only that part
+				parts := strings.SplitN(line, "has drifted", 2)
+				colorized = parts[0] + lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#FF9900")). // Orange color for drift phrase only
+					Render("has drifted") + parts[1]
+			} else {
+				colorized = line
+			}
+		} else if node.Type == "resource" {
 			// Resources are already colorized by the ui.Colorize function
 			colorized = ui.Colorize(line)
 		} else {
 			// Apply color based on the node's change type
 			switch node.ChangeType {
 			case "create":
-				if strings.Contains(strings.TrimSpace(line), "+") {
+				if strings.Contains(line, "+") {
 					colorized = strings.Replace(line, "+", ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
 				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
 					// Don't color closing braces
@@ -495,8 +539,8 @@ func (m Model) View() string {
 				} else {
 					colorized = ui.ColorSuccess + line + ui.ColorForegroundReset
 				}
-			case "delete":
-				if strings.Contains(strings.TrimSpace(line), "-") {
+			case "delete", "destroy":
+				if strings.Contains(line, "-") {
 					colorized = strings.Replace(line, "-", ui.ColorError+"-"+ui.ColorForegroundReset, 1)
 				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
 					// Don't color closing braces
@@ -505,25 +549,97 @@ func (m Model) View() string {
 					colorized = ui.ColorError + line + ui.ColorForegroundReset
 				}
 			case "update", "replace":
-				if strings.Contains(strings.TrimSpace(line), "~") {
+				if strings.Contains(line, "~") {
 					colorized = strings.Replace(line, "~", ui.ColorWarning+"~"+ui.ColorForegroundReset, 1)
-				} else if strings.Contains(strings.TrimSpace(line), "-/+") {
+				} else if strings.Contains(line, "-/+") {
 					colorized = strings.Replace(line, "-/+", ui.ColorError+"-"+ui.ColorForegroundReset+"/"+ui.ColorSuccess+"+"+ui.ColorForegroundReset, 1)
 				} else if strings.HasPrefix(strings.TrimSpace(line), "}") {
 					colorized = line
 				} else {
 					colorized = ui.ColorWarning + line + ui.ColorForegroundReset
 				}
+			case "drift":
+				// Apply a distinctive color only to the "has drifted" phrase
+				if strings.Contains(line, "has drifted") {
+					// Split the line at "has drifted" to color only that part
+					parts := strings.SplitN(line, "has drifted", 2)
+					colorized = parts[0] + lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#FF9900")). // Orange color for drift phrase only
+						Render("has drifted") + parts[1]
+				} else {
+					colorized = line
+				}
+			case "move":
+				// Special color for moved resources
+				colorized = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#00CCFF")). // Light blue for moved resources
+					Render(line)
 			default:
 				// For comments (like "# (5 unchanged attributes hidden)")
 				if strings.HasPrefix(strings.TrimSpace(line), "#") {
-					colorized = ui.ColorInfo + line + ui.ColorForegroundReset
+					// Check for status text with "will be"
+					if strings.Contains(line, "will be") {
+						// Color the status text appropriately
+						if strings.Contains(line, "will be created") ||
+							strings.Contains(line, "will be create") {
+							colorized = ui.ColorSuccess + line + ui.ColorForegroundReset
+						} else if strings.Contains(line, "will be destroyed") ||
+							strings.Contains(line, "will be destroy") {
+							colorized = ui.ColorError + line + ui.ColorForegroundReset
+						} else if strings.Contains(line, "will be updated") ||
+							strings.Contains(line, "will be update") ||
+							strings.Contains(line, "will be replaced") ||
+							strings.Contains(line, "will be replace") {
+							colorized = ui.ColorWarning + line + ui.ColorForegroundReset
+						} else {
+							colorized = ui.ColorInfo + line + ui.ColorForegroundReset
+						}
+					} else {
+						colorized = ui.ColorInfo + line + ui.ColorForegroundReset
+					}
 				} else if node.Type == "closing_brace" {
 					// Never color closing braces
 					colorized = line
 				} else {
 					colorized = ui.Colorize(line)
 				}
+			}
+		}
+
+		// Ensure nested resource symbols are colored properly
+		if strings.Contains(line, " + ") && !strings.Contains(colorized, ui.ColorSuccess+"+"+ui.ColorForegroundReset) {
+			colorized = strings.Replace(colorized, " + ", " "+ui.ColorSuccess+"+"+ui.ColorForegroundReset+" ", -1)
+		}
+		if strings.Contains(line, "+ ") && !strings.Contains(colorized, ui.ColorSuccess+"+"+ui.ColorForegroundReset) {
+			colorized = strings.Replace(colorized, "+ ", ui.ColorSuccess+"+"+ui.ColorForegroundReset+" ", -1)
+		}
+
+		// Handle - symbols
+		if strings.Contains(line, " - ") && !strings.Contains(colorized, ui.ColorError+"-"+ui.ColorForegroundReset) {
+			colorized = strings.Replace(colorized, " - ", " "+ui.ColorError+"-"+ui.ColorForegroundReset+" ", -1)
+		}
+		if strings.Contains(line, "- ") && !strings.Contains(colorized, ui.ColorError+"-"+ui.ColorForegroundReset) {
+			colorized = strings.Replace(colorized, "- ", ui.ColorError+"-"+ui.ColorForegroundReset+" ", -1)
+		}
+
+		// Handle ~ symbols
+		if strings.Contains(line, " ~ ") && !strings.Contains(colorized, ui.ColorWarning+"~"+ui.ColorForegroundReset) {
+			colorized = strings.Replace(colorized, " ~ ", " "+ui.ColorWarning+"~"+ui.ColorForegroundReset+" ", -1)
+		}
+		if strings.Contains(line, "~ ") && !strings.Contains(colorized, ui.ColorWarning+"~"+ui.ColorForegroundReset) {
+			colorized = strings.Replace(colorized, "~ ", ui.ColorWarning+"~"+ui.ColorForegroundReset+" ", -1)
+		}
+
+		// Special handling for moved resources
+		if node.PreviousAddress != "" && node.PreviousAddress != "" {
+			// Highlight the moved portion distinctively
+			movedText := fmt.Sprintf("(moved from %s)", node.PreviousAddress)
+			if strings.Contains(colorized, movedText) {
+				highlightedMove := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#00CCFF")). // Light blue for moved
+					Bold(true).
+					Render(movedText)
+				colorized = strings.Replace(colorized, movedText, highlightedMove, 1)
 			}
 		}
 
@@ -631,7 +747,7 @@ func Show(planOutput string) error {
 func parsePlan(planOutput string) []*TreeNode {
 	// Check if the input is JSON
 	if strings.TrimSpace(planOutput)[0] == '{' {
-		return parsePlanJSON(planOutput)
+		return parseTerraformPlanJSON(planOutput)
 	}
 
 	// Continue with the existing text parsing logic
@@ -640,7 +756,7 @@ func parsePlan(planOutput string) []*TreeNode {
 	// Root node for the entire plan
 	root := &TreeNode{
 		Text:       "Terraform Plan",
-		Expanded:   true,
+		Expanded:   true, // Root should always be expanded
 		IsRoot:     true,
 		Toggleable: true,
 	}
@@ -669,11 +785,11 @@ func parsePlan(planOutput string) []*TreeNode {
 			// Start a new resource node
 			resourceNode := &TreeNode{
 				Text:       strings.TrimSpace(line),
-				Expanded:   true, // Resources are expanded by default
+				Expanded:   false, // Resources are collapsed by default
 				Type:       "resource",
 				Depth:      indent / 2,
 				Parent:     root,
-				Toggleable: false, // Resource headers should not be toggleable
+				Toggleable: true,
 			}
 
 			// Check if the next line is a continuation (reason for destruction)
@@ -846,6 +962,12 @@ func renderHelpTooltip() string {
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#DDDDDD"))
 
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#2a2a6a")). // Match the section header color
+		Bold(true).
+		Padding(0, 1)
+
 	// Create help content with key bindings and descriptions
 	keys := []struct {
 		key  string
@@ -869,7 +991,7 @@ func renderHelpTooltip() string {
 	}
 
 	var helpContent strings.Builder
-	helpContent.WriteString("Navigation Commands\n\n")
+	helpContent.WriteString(headerStyle.Render("Navigation Commands") + "\n\n")
 
 	// Format each key binding with description
 	for _, item := range keys {
@@ -878,6 +1000,48 @@ func renderHelpTooltip() string {
 			descStyle.Render(item.desc))
 		helpContent.WriteString(line)
 	}
+
+	// Add color coding information
+	helpContent.WriteString("\n" + headerStyle.Render("Color Coding") + "\n\n")
+
+	colorInfo := []struct {
+		sample string
+		desc   string
+	}{
+		{ui.ColorSuccess + "■■■" + ui.ColorForegroundReset, "Resources to be created"},
+		{ui.ColorError + "■■■" + ui.ColorForegroundReset, "Resources to be destroyed"},
+		{ui.ColorWarning + "■■■" + ui.ColorForegroundReset, "Resources to be updated/replaced"},
+		{"", ""}, // Spacer
+	}
+
+	// Custom colors that might not be in the UI package
+	driftColor := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FF9900")).
+		Render("■■■")
+	moveColor := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#00CCFF")).
+		Render("■■■")
+
+	// Format color coding information
+	for _, item := range colorInfo {
+		if item.sample == "" {
+			helpContent.WriteString("\n")
+			continue
+		}
+		line := fmt.Sprintf("%s  %s\n",
+			item.sample,
+			descStyle.Render(item.desc))
+		helpContent.WriteString(line)
+	}
+
+	// Add special colors
+	helpContent.WriteString(fmt.Sprintf("%s  %s\n",
+		driftColor,
+		descStyle.Render("\"has drifted\" text for resources changed outside of Terraform")))
+
+	helpContent.WriteString(fmt.Sprintf("%s  %s\n",
+		moveColor,
+		descStyle.Render("Resources to be moved")))
 
 	return helpStyle.Render(helpContent.String())
 }
@@ -1081,4 +1245,848 @@ func wrapText(text string, width int, indentStr string) string {
 	}
 
 	return result.String()
+}
+
+// parseTerraformPlanJSON parses the terraform show json output and builds a tree of nodes.
+func parseTerraformPlanJSON(planJSON string) []*TreeNode {
+	// Implementation - this function parses JSON format plans
+	var plan map[string]interface{}
+	err := json.Unmarshal([]byte(planJSON), &plan)
+	if err != nil {
+		// If we can't parse JSON, return an error node
+		errorNode := &TreeNode{
+			Text:       "Error parsing plan JSON: " + err.Error(),
+			Expanded:   true,
+			Type:       "error",
+			Depth:      0,
+			Toggleable: false,
+		}
+		return []*TreeNode{errorNode}
+	}
+
+	// Root collection of nodes
+	var rootNodes []*TreeNode
+
+	// Add a header node for the plan (not part of the tree, just for display)
+	rootNodes = append(rootNodes, &TreeNode{
+		Text:       "Terraform Plan",
+		Expanded:   true,
+		Type:       "header",
+		Depth:      0,
+		Toggleable: false,
+	})
+
+	// Resource type counters
+	createCount := 0
+	updateCount := 0
+	replaceCount := 0
+	destroyCount := 0
+	moveCount := 0
+	driftCount := 0
+
+	// First, check for resource drift and add them directly as root nodes
+	if resourceDrift, ok := plan["resource_drift"].([]interface{}); ok && len(resourceDrift) > 0 {
+		// Add a section header (not a real node in the tree hierarchy)
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       "Resources Changed Outside of Terraform (Drift)",
+			Expanded:   true,
+			Type:       "section_header",
+			Depth:      0,
+			Toggleable: false,
+			ChangeType: "drift",
+		})
+
+		// Process each drifted resource
+		for _, driftItem := range resourceDrift {
+			driftMap, ok := driftItem.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			driftCount++
+			address, _ := driftMap["address"].(string)
+			typeStr, _ := driftMap["type"].(string)
+			change, ok := driftMap["change"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			actions, _ := change["actions"].([]interface{})
+
+			// Convert actions to strings
+			actionStrs := make([]string, 0, len(actions))
+			for _, a := range actions {
+				if aStr, ok := a.(string); ok {
+					actionStrs = append(actionStrs, aStr)
+				}
+			}
+
+			// Create resource node as a root node
+			changeType := mapActionsToChangeType(actionStrs)
+			resourceNode := &TreeNode{
+				Text:       fmt.Sprintf("# %s has drifted (%s)", address, changeType),
+				Expanded:   false, // Start collapsed
+				Type:       "resource",
+				Depth:      0, // As a root node
+				Toggleable: true,
+				ChangeType: changeType,
+				IsDrifted:  true,
+			}
+			rootNodes = append(rootNodes, resourceNode)
+
+			// Create a node for the resource block itself
+			resourceBlockNode := &TreeNode{
+				Text:       formatResourceDeclaration(address, typeStr, changeType),
+				Expanded:   false, // Start collapsed
+				Type:       "block",
+				Depth:      1, // One level deeper
+				Parent:     resourceNode,
+				Toggleable: true,
+				ChangeType: changeType,
+				IsDrifted:  true,
+			}
+			resourceNode.Children = append(resourceNode.Children, resourceBlockNode)
+
+			// Add before/after details if available as children of the resource block
+			addResourceDiffNodes(resourceBlockNode, change)
+
+			// Add closing brace
+			closingBraceNode := &TreeNode{
+				Text:       "}",
+				Expanded:   false, // Consistent with block node
+				Type:       "closing_brace",
+				Depth:      1,
+				Parent:     resourceNode,
+				Toggleable: false,
+			}
+			resourceNode.Children = append(resourceNode.Children, closingBraceNode)
+		}
+	}
+
+	// Process resource changes
+	resourceChanges, ok := plan["resource_changes"].([]interface{})
+	if !ok {
+		// No changes found
+		noChangesNode := &TreeNode{
+			Text:       "No changes. Infrastructure is up-to-date.",
+			Expanded:   true,
+			Type:       "info",
+			Depth:      0,
+			Toggleable: false,
+		}
+		rootNodes = append(rootNodes, noChangesNode)
+		return rootNodes
+	}
+
+	// Group resources by action type for display
+	var createResources []*TreeNode
+	var updateResources []*TreeNode
+	var replaceResources []*TreeNode
+	var destroyResources []*TreeNode
+	var movedResources []*TreeNode
+
+	// Process each resource change
+	for _, change := range resourceChanges {
+		changeMap, ok := change.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		address, _ := changeMap["address"].(string)
+		previousAddress, hasPrevious := changeMap["previous_address"].(string)
+		actionReason, _ := changeMap["action_reason"].(string)
+		typeStr, _ := changeMap["type"].(string)
+		mode, _ := changeMap["mode"].(string)
+
+		changeDetails, ok := changeMap["change"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		actions, _ := changeDetails["actions"].([]interface{})
+
+		// Skip no-ops
+		if len(actions) == 0 {
+			continue
+		}
+
+		// Convert actions to strings
+		actionStrs := make([]string, 0, len(actions))
+		for _, a := range actions {
+			if aStr, ok := a.(string); ok {
+				actionStrs = append(actionStrs, aStr)
+			}
+		}
+
+		// Skip no-ops
+		if len(actionStrs) == 1 && actionStrs[0] == "no-op" {
+			continue
+		}
+
+		// Determine the change type
+		changeType := mapActionsToChangeType(actionStrs)
+
+		// Create resource node with appropriate text
+		var resourceText string
+		wasMoved := hasPrevious && previousAddress != address && previousAddress != ""
+
+		if wasMoved {
+			resourceText = fmt.Sprintf("# %s will be %s (moved from %s)", address, getGrammaticalAction(changeType), previousAddress)
+			moveCount++
+		} else if actionReason != "" {
+			reasonText := getActionReasonDisplay(actionReason)
+			resourceText = fmt.Sprintf("# %s will be %s (%s)", address, getGrammaticalAction(changeType), reasonText)
+		} else {
+			resourceText = fmt.Sprintf("# %s will be %s", address, getGrammaticalAction(changeType))
+		}
+
+		// Create the resource node (as a root node)
+		resourceNode := &TreeNode{
+			Text:            resourceText,
+			Expanded:        false, // Start collapsed
+			Type:            "resource",
+			Depth:           0, // As a root node
+			Toggleable:      true,
+			ChangeType:      changeType,
+			PreviousAddress: previousAddress,
+			ActionReason:    actionReason,
+		}
+
+		// Create a node for the resource block itself with the appropriate formatting based on the action
+		var resourceBlockPrefix string
+		switch changeType {
+		case "create":
+			resourceBlockPrefix = "+"
+			createCount++
+		case "destroy":
+			resourceBlockPrefix = "-"
+			destroyCount++
+		case "update":
+			resourceBlockPrefix = "~"
+			updateCount++
+		case "replace":
+			resourceBlockPrefix = "-/+"
+			replaceCount++
+		default:
+			resourceBlockPrefix = " "
+		}
+
+		// Format resource declaration (e.g., "+ resource "aws_instance" "example" {")
+		resourceBlockDeclaration := fmt.Sprintf("%s resource \"%s\" \"%s\" {",
+			resourceBlockPrefix,
+			typeStr,
+			getResourceNameFromAddress(address, mode, typeStr))
+
+		resourceBlockNode := &TreeNode{
+			Text:            resourceBlockDeclaration,
+			Expanded:        false, // Start collapsed
+			Type:            "block",
+			Depth:           1, // One level deeper
+			Parent:          resourceNode,
+			Toggleable:      true,
+			ChangeType:      changeType,
+			PreviousAddress: previousAddress,
+			ActionReason:    actionReason,
+		}
+		resourceNode.Children = append(resourceNode.Children, resourceBlockNode)
+
+		// Add details as children of the resource block node
+		addResourceDiffNodes(resourceBlockNode, changeDetails, changeType)
+
+		// Add a closing brace node to the resource block
+		closingBraceNode := &TreeNode{
+			Text:       "}",
+			Expanded:   false, // Consistent with block node
+			Type:       "closing_brace",
+			Depth:      1,
+			Parent:     resourceNode,
+			Toggleable: false,
+		}
+		resourceNode.Children = append(resourceNode.Children, closingBraceNode)
+
+		// Add to the appropriate list based on type
+		if wasMoved {
+			movedResources = append(movedResources, resourceNode)
+		} else {
+			switch changeType {
+			case "create":
+				createResources = append(createResources, resourceNode)
+			case "update":
+				updateResources = append(updateResources, resourceNode)
+			case "replace":
+				replaceResources = append(replaceResources, resourceNode)
+			case "destroy":
+				destroyResources = append(destroyResources, resourceNode)
+			}
+		}
+	}
+
+	// Add section header and resources for each group
+	if createCount > 0 {
+		// Add section header (not a node in the tree hierarchy)
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       fmt.Sprintf("Resources to Create (%d)", createCount),
+			Expanded:   true,
+			Type:       "section_header",
+			Depth:      0,
+			Toggleable: false,
+			ChangeType: "create",
+		})
+
+		// Add each resource node directly to the root
+		rootNodes = append(rootNodes, createResources...)
+	}
+
+	if updateCount > 0 {
+		// Add section header
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       fmt.Sprintf("Resources to Update (%d)", updateCount),
+			Expanded:   true,
+			Type:       "section_header",
+			Depth:      0,
+			Toggleable: false,
+			ChangeType: "update",
+		})
+
+		// Add each resource node directly to the root
+		rootNodes = append(rootNodes, updateResources...)
+	}
+
+	if replaceCount > 0 {
+		// Add section header
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       fmt.Sprintf("Resources to Replace (%d)", replaceCount),
+			Expanded:   true,
+			Type:       "section_header",
+			Depth:      0,
+			Toggleable: false,
+			ChangeType: "replace",
+		})
+
+		// Add each resource node directly to the root
+		rootNodes = append(rootNodes, replaceResources...)
+	}
+
+	if destroyCount > 0 {
+		// Add section header
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       fmt.Sprintf("Resources to Destroy (%d)", destroyCount),
+			Expanded:   true,
+			Type:       "section_header",
+			Depth:      0,
+			Toggleable: false,
+			ChangeType: "destroy",
+		})
+
+		// Add each resource node directly to the root
+		rootNodes = append(rootNodes, destroyResources...)
+	}
+
+	if moveCount > 0 {
+		// Add section header
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       fmt.Sprintf("Resources to Move (%d)", moveCount),
+			Expanded:   true,
+			Type:       "section_header",
+			Depth:      0,
+			Toggleable: false,
+			ChangeType: "move",
+		})
+
+		// Add each resource node directly to the root
+		rootNodes = append(rootNodes, movedResources...)
+	}
+
+	// Add summary
+	summaryText := fmt.Sprintf("Plan: %d to add, %d to change, %d to destroy", createCount, updateCount, destroyCount)
+	if moveCount > 0 {
+		summaryText += fmt.Sprintf(" (%d moved)", moveCount)
+	}
+	if driftCount > 0 {
+		summaryText += fmt.Sprintf(" (%d drifted)", driftCount)
+	}
+
+	rootNodes = append(rootNodes, &TreeNode{
+		Text:       summaryText,
+		Expanded:   true,
+		Type:       "summary",
+		Depth:      0,
+		Toggleable: false,
+	})
+
+	return rootNodes
+}
+
+// Extract the resource name from an address (e.g., "module.foo.aws_instance.bar[0]" -> "bar")
+func getResourceNameFromAddress(address, mode, resourceType string) string {
+	// Handle module resources
+	parts := strings.Split(address, ".")
+	if len(parts) > 0 {
+		lastPart := parts[len(parts)-1]
+		// Handle indexed resources like "aws_instance.bar[0]"
+		indexBracket := strings.IndexByte(lastPart, '[')
+		if indexBracket > 0 {
+			lastPart = lastPart[:indexBracket]
+		}
+		return lastPart
+	}
+	return address
+}
+
+// Helper function to format a resource declaration
+func formatResourceDeclaration(address, resourceType, changeType string) string {
+	switch changeType {
+	case "create":
+		return fmt.Sprintf("+ resource \"%s\" {", resourceType)
+	case "destroy":
+		return fmt.Sprintf("- resource \"%s\" {", resourceType)
+	case "update":
+		return fmt.Sprintf("~ resource \"%s\" {", resourceType)
+	case "replace":
+		return fmt.Sprintf("-/+ resource \"%s\" {", resourceType)
+	default:
+		return fmt.Sprintf("  resource \"%s\" {", resourceType)
+	}
+}
+
+// Helper function to add resource attribute and diff nodes based on the change type
+func addResourceDiffNodes(parent *TreeNode, change map[string]interface{}, changeType ...string) {
+	before, hasBefore := change["before"]
+	after, hasAfter := change["after"]
+
+	// Determine the change type - either from parameter or parent node
+	var effectiveChangeType string
+	if len(changeType) > 0 {
+		effectiveChangeType = changeType[0]
+	} else if parent.ChangeType != "" {
+		effectiveChangeType = parent.ChangeType
+	} else {
+		// Default handling if no change type is provided
+		if hasBefore && hasAfter {
+			effectiveChangeType = "update"
+		} else if hasAfter {
+			effectiveChangeType = "create"
+		} else if hasBefore {
+			effectiveChangeType = "destroy"
+		}
+	}
+
+	// Process attributes based on change type
+	if effectiveChangeType == "create" && hasAfter {
+		// For creates, only show after values
+		addResourceAttributes(parent, after, "+", parent.Depth+1)
+	} else if effectiveChangeType == "destroy" && hasBefore {
+		// For destroys, only show before values
+		addResourceAttributes(parent, before, "-", parent.Depth+1)
+	} else if (effectiveChangeType == "update" || effectiveChangeType == "replace") && hasBefore && hasAfter {
+		// For updates/replaces, compare before and after
+		addResourceAttributeDiffs(parent, before, after, parent.Depth+1)
+	}
+}
+
+// Helper to map action strings to change type
+func mapActionsToChangeType(actions []string) string {
+	if contains(actions, "create") && contains(actions, "delete") {
+		return "replace"
+	} else if contains(actions, "create") {
+		return "create"
+	} else if contains(actions, "delete") {
+		return "destroy"
+	} else if contains(actions, "update") {
+		return "update"
+	}
+	return strings.Join(actions, "/")
+}
+
+// Helper to translate action reason to display string
+func getActionReasonDisplay(reason string) string {
+	switch reason {
+	case "replace_because_tainted":
+		return "tainted, so must be replaced"
+	case "replace_because_cannot_update":
+		return "cannot be updated in-place"
+	case "replace_by_request":
+		return "replacement requested"
+	case "delete_because_no_resource_config":
+		return "no resource configuration found"
+	case "delete_because_no_module":
+		return "containing module is gone"
+	case "delete_because_wrong_repetition":
+		return "wrong repetition mode"
+	case "delete_because_count_index":
+		return "count index out of range"
+	case "delete_because_each_key":
+		return "for_each key not found"
+	case "read_because_config_unknown":
+		return "configuration contains unknown values"
+	case "read_because_dependency_pending":
+		return "has pending dependent resources"
+	default:
+		return reason
+	}
+}
+
+// Add resource attribute diffs with proper formatting
+func addResourceAttributeDiffs(parent *TreeNode, before, after interface{}, depth int) {
+	processAttributeDiffs(parent, before, after, depth)
+}
+
+// Helper function to process attribute differences
+func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth int) {
+	if before == nil && after == nil {
+		return
+	}
+
+	// Check if both before and after are maps
+	beforeIsMap := false
+	afterIsMap := false
+
+	if before != nil {
+		_, beforeIsMap = before.(map[string]interface{})
+	}
+
+	if after != nil {
+		_, afterIsMap = after.(map[string]interface{})
+	}
+
+	if !beforeIsMap || !afterIsMap {
+		// Handle non-map types with a simple comparison
+		if !reflect.DeepEqual(before, after) {
+			beforeStr := formatAttributeValue(before)
+			afterStr := formatAttributeValue(after)
+
+			node := &TreeNode{
+				Text:       fmt.Sprintf("~ value = %s -> %s", beforeStr, afterStr),
+				Expanded:   false,
+				Type:       "attribute",
+				Depth:      depth,
+				Parent:     parent,
+				Toggleable: false,
+				ChangeType: "update",
+			}
+			parent.Children = append(parent.Children, node)
+		}
+		return
+	}
+
+	// Collect all keys from both before and after
+	allKeys := make(map[string]bool)
+	for k := range before.(map[string]interface{}) {
+		allKeys[k] = true
+	}
+	for k := range after.(map[string]interface{}) {
+		allKeys[k] = true
+	}
+
+	// Sort the keys for consistent display
+	keys := make([]string, 0, len(allKeys))
+	for k := range allKeys {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Process each key
+	for _, key := range keys {
+		beforeVal, beforeExists := before.(map[string]interface{})[key]
+		afterVal, afterExists := after.(map[string]interface{})[key]
+
+		// Handle added attributes
+		if !beforeExists && afterExists {
+			addResourceAttributes(parent, map[string]interface{}{key: afterVal}, "+", depth)
+			continue
+		}
+
+		// Handle removed attributes
+		if beforeExists && !afterExists {
+			addResourceAttributes(parent, map[string]interface{}{key: beforeVal}, "-", depth)
+			continue
+		}
+
+		// Handle changed attributes
+		if !reflect.DeepEqual(beforeVal, afterVal) {
+			beforeMapValue, beforeIsMap := beforeVal.(map[string]interface{})
+			afterMapValue, afterIsMap := afterVal.(map[string]interface{})
+
+			// Handle nested blocks
+			if beforeIsMap && afterIsMap {
+				// Create block node
+				blockNode := &TreeNode{
+					Text:       fmt.Sprintf("~ %s {", key),
+					Expanded:   false, // Start collapsed
+					Type:       "block",
+					Depth:      depth,
+					Parent:     parent,
+					Toggleable: true,
+				}
+				parent.Children = append(parent.Children, blockNode)
+
+				// Recursively compare nested blocks
+				processAttributeDiffs(blockNode, beforeMapValue, afterMapValue, depth+1)
+
+				// Add closing brace
+				closingBrace := &TreeNode{
+					Text:       "}",
+					Expanded:   false, // Consistent with block node
+					Type:       "closing_brace",
+					Depth:      depth,
+					Parent:     parent,
+					Toggleable: false,
+				}
+				parent.Children = append(parent.Children, closingBrace)
+			} else {
+				// Handle simple value changes
+				beforeStr := formatAttributeValue(beforeVal)
+				afterStr := formatAttributeValue(afterVal)
+
+				if afterVal == "(known after apply)" || afterStr == "(known after apply)" {
+					node := &TreeNode{
+						Text:       fmt.Sprintf("~ %s = %s -> (known after apply)", key, beforeStr),
+						Expanded:   false,
+						Type:       "attribute",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: false,
+						ChangeType: "update",
+					}
+					parent.Children = append(parent.Children, node)
+				} else {
+					node := &TreeNode{
+						Text:       fmt.Sprintf("~ %s = %s -> %s", key, beforeStr, afterStr),
+						Expanded:   false,
+						Type:       "attribute",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: false,
+						ChangeType: "update",
+					}
+					parent.Children = append(parent.Children, node)
+				}
+			}
+		} else {
+			// Unchanged attribute - could add with a comment about being unchanged
+			// For now, we'll skip to reduce clutter
+
+			// Handle complex unchanged values like blocks
+			if _, isMap := beforeVal.(map[string]interface{}); isMap {
+				// Add a collapsed node for the unchanged block
+				node := &TreeNode{
+					Text:       fmt.Sprintf("  %s {", key),
+					Expanded:   false, // Keep collapsed by default since it's unchanged
+					Type:       "block",
+					Depth:      depth,
+					Parent:     parent,
+					Toggleable: true,
+				}
+				parent.Children = append(parent.Children, node)
+
+				// Add a hint about unchanged content
+				hint := &TreeNode{
+					Text:       "# (unchanged block hidden)",
+					Expanded:   false,
+					Type:       "comment",
+					Depth:      depth + 1,
+					Parent:     node,
+					Toggleable: false,
+				}
+				node.Children = append(node.Children, hint)
+
+				// Add closing brace
+				closingBrace := &TreeNode{
+					Text:       "}",
+					Expanded:   false, // Consistent with block node
+					Type:       "closing_brace",
+					Depth:      depth,
+					Parent:     parent,
+					Toggleable: false,
+				}
+				parent.Children = append(parent.Children, closingBrace)
+			}
+		}
+	}
+
+	// Add a hint about hidden unchanged attributes if there are many
+	var unusedCount int = 0
+	for _, key := range keys {
+		beforeVal, beforeExists := before.(map[string]interface{})[key]
+		afterVal, afterExists := after.(map[string]interface{})[key]
+
+		if beforeExists && afterExists && reflect.DeepEqual(beforeVal, afterVal) {
+			unusedCount++
+		}
+	}
+
+	if unusedCount > 3 {
+		// Add a comment about hidden attributes
+		comment := &TreeNode{
+			Text:       fmt.Sprintf("# (%d unchanged attributes hidden)", unusedCount),
+			Expanded:   false,
+			Type:       "comment",
+			Depth:      depth,
+			Parent:     parent,
+			Toggleable: false,
+		}
+		parent.Children = append(parent.Children, comment)
+	}
+}
+
+// Format an attribute value for display
+func formatAttributeValue(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+
+	switch v := value.(type) {
+	case string:
+		return fmt.Sprintf("\"%s\"", v)
+	case map[string]interface{}:
+		return "{...}" // Simplified representation for maps
+	case []interface{}:
+		return "[...]" // Simplified representation for arrays
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+// Helper function to add resource attributes as child nodes
+func addResourceAttributes(parent *TreeNode, attributes interface{}, prefix string, depth int) {
+	if attributes == nil {
+		return
+	}
+
+	attrMap, ok := attributes.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	// Sort the attribute keys for consistent display
+	keys := make([]string, 0, len(attrMap))
+	for k := range attrMap {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Add each attribute as a node
+	for _, key := range keys {
+		value := attrMap[key]
+
+		// Handle different value types
+		if value == nil {
+			// Nil value
+			node := &TreeNode{
+				Text:       fmt.Sprintf("%s %s = null", prefix, key),
+				Expanded:   false,
+				Type:       "attribute",
+				Depth:      depth,
+				Parent:     parent,
+				Toggleable: false,
+			}
+			parent.Children = append(parent.Children, node)
+		} else if mapValue, isMap := value.(map[string]interface{}); isMap {
+			// Nested block
+			blockNode := &TreeNode{
+				Text:       fmt.Sprintf("%s %s {", prefix, key),
+				Expanded:   true,
+				Type:       "block",
+				Depth:      depth,
+				Parent:     parent,
+				Toggleable: true,
+			}
+			parent.Children = append(parent.Children, blockNode)
+
+			// Add nested attributes
+			addResourceAttributes(blockNode, mapValue, prefix, depth+1)
+
+			// Add closing brace
+			closingBrace := &TreeNode{
+				Text:       "}",
+				Expanded:   false, // Consistent with block node
+				Type:       "closing_brace",
+				Depth:      depth,
+				Parent:     parent,
+				Toggleable: false,
+			}
+			parent.Children = append(parent.Children, closingBrace)
+		} else if arrValue, isArr := value.([]interface{}); isArr {
+			// Array value
+			for i, item := range arrValue {
+				if mapItem, isMapItem := item.(map[string]interface{}); isMapItem {
+					// Nested block in array
+					blockNode := &TreeNode{
+						Text:       fmt.Sprintf("%s %s {", prefix, key),
+						Expanded:   true,
+						Type:       "block",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: true,
+					}
+					parent.Children = append(parent.Children, blockNode)
+
+					// Add nested attributes
+					addResourceAttributes(blockNode, mapItem, prefix, depth+1)
+
+					// Add closing brace
+					closingBrace := &TreeNode{
+						Text:       "}",
+						Expanded:   false, // Consistent with block node
+						Type:       "closing_brace",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: false,
+					}
+					parent.Children = append(parent.Children, closingBrace)
+				} else {
+					// Simple array item
+					node := &TreeNode{
+						Text:       fmt.Sprintf("%s %s[%d] = %v", prefix, key, i, item),
+						Expanded:   false,
+						Type:       "attribute",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: false,
+					}
+					parent.Children = append(parent.Children, node)
+				}
+			}
+		} else {
+			// Simple value
+			valueStr := fmt.Sprintf("%v", value)
+			if strValue, isStr := value.(string); isStr {
+				valueStr = fmt.Sprintf("\"%s\"", strValue)
+			}
+
+			node := &TreeNode{
+				Text:       fmt.Sprintf("%s %s = %s", prefix, key, valueStr),
+				Expanded:   false,
+				Type:       "attribute",
+				Depth:      depth,
+				Parent:     parent,
+				Toggleable: false,
+			}
+			parent.Children = append(parent.Children, node)
+		}
+	}
+}
+
+// Helper function to check if a node is a resource node that should be navigated to
+func isRootResource(node *TreeNode) bool {
+	// With the new structure, resource nodes are directly at the root level with depth 0
+	return node.Type == "resource"
+}
+
+// Helper to get grammatically correct action text
+func getGrammaticalAction(action string) string {
+	switch action {
+	case "create":
+		return "created"
+	case "update":
+		return "updated"
+	case "replace":
+		return "replaced"
+	case "destroy":
+		return "destroyed"
+	case "move":
+		return "moved"
+	default:
+		return action + "d" // Add 'd' as a general case
+	}
 }

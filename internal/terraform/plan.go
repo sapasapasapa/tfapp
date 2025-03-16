@@ -17,6 +17,11 @@ import (
 type TerraformPlan struct {
 	ResourceChanges []ResourceChange `json:"resource_changes"`
 	PlannedValues   PlannedValues    `json:"planned_values"`
+	ResourceDrift   []ResourceChange `json:"resource_drift"`
+	FormatVersion   string           `json:"format_version"`
+	Applyable       bool             `json:"applyable"`
+	Complete        bool             `json:"complete"`
+	Errored         bool             `json:"errored"`
 }
 
 type PlannedValues struct {
@@ -41,18 +46,26 @@ type Resource struct {
 }
 
 type ResourceChange struct {
-	Address       string `json:"address"`
-	ModuleAddress string `json:"module_address,omitempty"`
-	Mode          string `json:"mode"`
-	Type          string `json:"type"`
-	Name          string `json:"name"`
-	Change        Change `json:"change"`
+	Address         string      `json:"address"`
+	PreviousAddress string      `json:"previous_address,omitempty"`
+	ModuleAddress   string      `json:"module_address,omitempty"`
+	Mode            string      `json:"mode"`
+	Type            string      `json:"type"`
+	Name            string      `json:"name"`
+	Index           interface{} `json:"index,omitempty"` // Can be int or string
+	Deposed         string      `json:"deposed,omitempty"`
+	Change          Change      `json:"change"`
+	ActionReason    string      `json:"action_reason,omitempty"`
 }
 
 type Change struct {
-	Actions []string    `json:"actions"`
-	Before  interface{} `json:"before"`
-	After   interface{} `json:"after"`
+	Actions         []string    `json:"actions"`
+	Before          interface{} `json:"before"`
+	After           interface{} `json:"after"`
+	AfterUnknown    interface{} `json:"after_unknown,omitempty"`
+	BeforeSensitive interface{} `json:"before_sensitive,omitempty"`
+	AfterSensitive  interface{} `json:"after_sensitive,omitempty"`
+	ReplacePaths    [][]string  `json:"replace_paths,omitempty"`
 }
 
 // PlanManager handles Terraform plan operations.
@@ -77,7 +90,6 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 
 	planArgs := []string{"plan", "-out", planFilePath}
 	planArgs = append(planArgs, args...)
-	resources := []models.Resource{}
 
 	var printed_line string
 	if !targeted {
@@ -107,6 +119,22 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 		return nil, fmt.Errorf("error parsing plan JSON: %w", err)
 	}
 
+	// Check plan metadata
+	if plan.Errored {
+		fmt.Printf("%s%sWarning: The plan has errors and may be incomplete.%s\n",
+			ui.ColorWarning, ui.TextBold, ui.ColorReset)
+	}
+
+	if !plan.Applyable {
+		fmt.Printf("%s%sWarning: This plan is not applyable according to Terraform.%s\n",
+			ui.ColorWarning, ui.TextBold, ui.ColorReset)
+	}
+
+	if !plan.Complete {
+		fmt.Printf("%s%sNote: This plan is incomplete. After applying, you will need to run plan again.%s\n",
+			ui.ColorInfo, ui.TextBold, ui.ColorReset)
+	}
+
 	// Check if there are no changes
 	if len(plan.ResourceChanges) == 0 {
 		fmt.Printf("%s%sNo changes detected in plan. Your infrastructure is up-to-date.%s\n",
@@ -128,61 +156,8 @@ func (p *PlanManager) CreatePlan(ctx interface{}, planFilePath string, args []st
 		os.Exit(0)
 	}
 
-	fmt.Println("\nSummary of proposed changes:")
-
-	// Count actions for summary
-	creates := 0
-	updates := 0
-	destroys := 0
-	replaces := 0
-
-	// Process each resource change
-	for _, change := range plan.ResourceChanges {
-
-		if len(change.Change.Actions) == 0 {
-			continue
-		}
-
-		if change.Change.Actions[0] == "no-op" {
-			continue
-		}
-
-		resourceName := change.Address
-		action := mapActions(change.Change.Actions)
-
-		// Update counts for summary
-		for _, a := range change.Change.Actions {
-			switch a {
-			case "create":
-				creates++
-			case "update":
-				updates++
-			case "delete":
-				destroys++
-			case "replace":
-				replaces++
-			}
-		}
-
-		// Generate a human-friendly line similar to the text output
-		line := formatResourceChangeLine(resourceName, action)
-
-		resources = append(resources, models.Resource{
-			Name:   resourceName,
-			Action: action,
-			Line:   line,
-		})
-
-		colorizedLine := ui.Colorize(line)
-		fmt.Println(colorizedLine)
-	}
-
-	// Display plan summary
-	summary := fmt.Sprintf("Plan: %d to add, %d to change, %d to destroy.", creates, updates, destroys)
-	fmt.Println(ui.Colorize(summary))
-
-	fmt.Println()
-	return resources, nil
+	// Use the unified DisplayPlanSummary function to show and return resources
+	return DisplayPlanSummary(ctxTyped, planFilePath)
 }
 
 // formatResourceChangeLine generates a human-readable line for a resource change
@@ -227,6 +202,34 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+// getActionReasonText returns a human-readable description of the action reason
+func getActionReasonText(reason string) string {
+	switch reason {
+	case "replace_because_tainted":
+		return "tainted, so must be replaced"
+	case "replace_because_cannot_update":
+		return "cannot be updated in-place"
+	case "replace_by_request":
+		return "replacement requested"
+	case "delete_because_no_resource_config":
+		return "no resource configuration found"
+	case "delete_because_no_module":
+		return "containing module is gone"
+	case "delete_because_wrong_repetition":
+		return "wrong repetition mode"
+	case "delete_because_count_index":
+		return "count index out of range"
+	case "delete_because_each_key":
+		return "for_each key not found"
+	case "read_because_config_unknown":
+		return "configuration contains unknown values"
+	case "read_because_dependency_pending":
+		return "has pending dependent resources"
+	default:
+		return reason
+	}
+}
+
 // ShowPlan displays the full details of a saved plan file.
 func (p *PlanManager) ShowPlan(ctx interface{}, planFilePath string) error {
 	ctxTyped, ok := ctx.(context.Context)
@@ -245,19 +248,4 @@ func (p *PlanManager) ShowPlan(ctx interface{}, planFilePath string) error {
 	return plan.Show(string(output))
 }
 
-// getResourceAction determines the action being performed on a resource from a plan line.
-func getResourceAction(line string) string {
-	if strings.Contains(line, "will be created") {
-		return "create"
-	} else if strings.Contains(line, "will be destroyed") {
-		return "destroy"
-	} else if strings.Contains(line, "will be updated in-place") {
-		return "update"
-	} else if strings.Contains(line, "must be replaced") {
-		return "replace"
-	}
-	return ""
-}
-
-// Ensure PlanManager implements the models.PlanService interface
 var _ models.PlanService = (*PlanManager)(nil)
