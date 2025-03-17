@@ -1267,15 +1267,6 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 	// Root collection of nodes
 	var rootNodes []*TreeNode
 
-	// Add a header node for the plan (not part of the tree, just for display)
-	rootNodes = append(rootNodes, &TreeNode{
-		Text:       "Terraform Plan",
-		Expanded:   true,
-		Type:       "header",
-		Depth:      0,
-		Toggleable: false,
-	})
-
 	// Resource type counters
 	createCount := 0
 	updateCount := 0
@@ -1295,6 +1286,9 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 			Toggleable: false,
 			ChangeType: "drift",
 		})
+
+		// Create a map to store drifted resources by their path
+		driftedResources := make(map[string]*TreeNode)
 
 		// Process each drifted resource
 		for _, driftItem := range resourceDrift {
@@ -1332,7 +1326,6 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 				ChangeType: changeType,
 				IsDrifted:  true,
 			}
-			rootNodes = append(rootNodes, resourceNode)
 
 			// Create a node for the resource block itself
 			resourceBlockNode := &TreeNode{
@@ -1360,7 +1353,29 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 				Toggleable: false,
 			}
 			resourceNode.Children = append(resourceNode.Children, closingBraceNode)
+
+			// Store in map
+			driftedResources[address] = resourceNode
 		}
+
+		// Sort and add drifted resources
+		var driftedPaths []string
+		for path := range driftedResources {
+			driftedPaths = append(driftedPaths, path)
+		}
+		sort.Strings(driftedPaths)
+		for _, path := range driftedPaths {
+			rootNodes = append(rootNodes, driftedResources[path])
+		}
+
+		// Add a separator after drifted resources
+		rootNodes = append(rootNodes, &TreeNode{
+			Text:       "",
+			Expanded:   true,
+			Type:       "separator",
+			Depth:      0,
+			Toggleable: false,
+		})
 	}
 
 	// Process resource changes
@@ -1378,12 +1393,16 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 		return rootNodes
 	}
 
-	// Group resources by action type for display
-	var createResources []*TreeNode
-	var updateResources []*TreeNode
-	var replaceResources []*TreeNode
-	var destroyResources []*TreeNode
-	var movedResources []*TreeNode
+	// Create a map to store resources by their path
+	type resourceInfo struct {
+		node       *TreeNode
+		path       string
+		changeType string
+		wasMoved   bool
+	}
+
+	// Store all resources in a map
+	resources := make(map[string]resourceInfo)
 
 	// Process each resource change
 	for _, change := range resourceChanges {
@@ -1467,6 +1486,9 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 		case "replace":
 			resourceBlockPrefix = "-/+"
 			replaceCount++
+			// A replace counts as both a create and a destroy
+			createCount++
+			destroyCount++
 		default:
 			resourceBlockPrefix = " "
 		}
@@ -1504,97 +1526,36 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 		}
 		resourceNode.Children = append(resourceNode.Children, closingBraceNode)
 
-		// Add to the appropriate list based on type
-		if wasMoved {
-			movedResources = append(movedResources, resourceNode)
-		} else {
-			switch changeType {
-			case "create":
-				createResources = append(createResources, resourceNode)
-			case "update":
-				updateResources = append(updateResources, resourceNode)
-			case "replace":
-				replaceResources = append(replaceResources, resourceNode)
-			case "destroy":
-				destroyResources = append(destroyResources, resourceNode)
-			}
+		// Store the resource in our map
+		resources[address] = resourceInfo{
+			node:       resourceNode,
+			path:       address,
+			changeType: changeType,
+			wasMoved:   wasMoved,
 		}
 	}
 
-	// Add section header and resources for each group
-	if createCount > 0 {
-		// Add section header (not a node in the tree hierarchy)
-		rootNodes = append(rootNodes, &TreeNode{
-			Text:       fmt.Sprintf("Resources to Create (%d)", createCount),
-			Expanded:   true,
-			Type:       "section_header",
-			Depth:      0,
-			Toggleable: false,
-			ChangeType: "create",
-		})
+	// Sort resources by path
+	var sortedPaths []string
+	for path := range resources {
+		sortedPaths = append(sortedPaths, path)
+	}
+	sort.Strings(sortedPaths)
 
-		// Add each resource node directly to the root
-		rootNodes = append(rootNodes, createResources...)
+	// Add sorted resources to root nodes
+	for _, path := range sortedPaths {
+		info := resources[path]
+		if !info.wasMoved {
+			rootNodes = append(rootNodes, info.node)
+		}
 	}
 
-	if updateCount > 0 {
-		// Add section header
-		rootNodes = append(rootNodes, &TreeNode{
-			Text:       fmt.Sprintf("Resources to Update (%d)", updateCount),
-			Expanded:   true,
-			Type:       "section_header",
-			Depth:      0,
-			Toggleable: false,
-			ChangeType: "update",
-		})
-
-		// Add each resource node directly to the root
-		rootNodes = append(rootNodes, updateResources...)
-	}
-
-	if replaceCount > 0 {
-		// Add section header
-		rootNodes = append(rootNodes, &TreeNode{
-			Text:       fmt.Sprintf("Resources to Replace (%d)", replaceCount),
-			Expanded:   true,
-			Type:       "section_header",
-			Depth:      0,
-			Toggleable: false,
-			ChangeType: "replace",
-		})
-
-		// Add each resource node directly to the root
-		rootNodes = append(rootNodes, replaceResources...)
-	}
-
-	if destroyCount > 0 {
-		// Add section header
-		rootNodes = append(rootNodes, &TreeNode{
-			Text:       fmt.Sprintf("Resources to Destroy (%d)", destroyCount),
-			Expanded:   true,
-			Type:       "section_header",
-			Depth:      0,
-			Toggleable: false,
-			ChangeType: "destroy",
-		})
-
-		// Add each resource node directly to the root
-		rootNodes = append(rootNodes, destroyResources...)
-	}
-
-	if moveCount > 0 {
-		// Add section header
-		rootNodes = append(rootNodes, &TreeNode{
-			Text:       fmt.Sprintf("Resources to Move (%d)", moveCount),
-			Expanded:   true,
-			Type:       "section_header",
-			Depth:      0,
-			Toggleable: false,
-			ChangeType: "move",
-		})
-
-		// Add each resource node directly to the root
-		rootNodes = append(rootNodes, movedResources...)
+	// Add moved resources at the end
+	for _, path := range sortedPaths {
+		info := resources[path]
+		if info.wasMoved {
+			rootNodes = append(rootNodes, info.node)
+		}
 	}
 
 	// Add summary
@@ -1680,20 +1641,22 @@ func addResourceDiffNodes(parent *TreeNode, change map[string]interface{}, chang
 		addResourceAttributes(parent, before, "-", parent.Depth+1)
 	} else if (effectiveChangeType == "update" || effectiveChangeType == "replace") && hasBefore && hasAfter {
 		// For updates/replaces, compare before and after
-		addResourceAttributeDiffs(parent, before, after, parent.Depth+1)
+		processAttributeDiffs(parent, before, after, parent.Depth+1)
 	}
 }
 
 // Helper to map action strings to change type
 func mapActionsToChangeType(actions []string) string {
-	if contains(actions, "create") && contains(actions, "delete") {
+	if sliceContains(actions, "create") && sliceContains(actions, "delete") {
 		return "replace"
-	} else if contains(actions, "create") {
+	} else if sliceContains(actions, "create") {
 		return "create"
-	} else if contains(actions, "delete") {
+	} else if sliceContains(actions, "delete") {
 		return "destroy"
-	} else if contains(actions, "update") {
+	} else if sliceContains(actions, "update") {
 		return "update"
+	} else if len(actions) == 0 {
+		return "no-op"
 	}
 	return strings.Join(actions, "/")
 }
@@ -1726,9 +1689,32 @@ func getActionReasonDisplay(reason string) string {
 	}
 }
 
-// Add resource attribute diffs with proper formatting
-func addResourceAttributeDiffs(parent *TreeNode, before, after interface{}, depth int) {
-	processAttributeDiffs(parent, before, after, depth)
+// Helper to check if a slice contains a string
+func sliceContains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper to get grammatically correct action text
+func getGrammaticalAction(action string) string {
+	switch action {
+	case "create":
+		return "created"
+	case "update":
+		return "updated"
+	case "replace":
+		return "replaced"
+	case "destroy":
+		return "destroyed"
+	case "move":
+		return "moved"
+	default:
+		return action + "d" // Add 'd' as a general case
+	}
 }
 
 // Helper function to process attribute differences
@@ -1738,16 +1724,8 @@ func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth in
 	}
 
 	// Check if both before and after are maps
-	beforeIsMap := false
-	afterIsMap := false
-
-	if before != nil {
-		_, beforeIsMap = before.(map[string]interface{})
-	}
-
-	if after != nil {
-		_, afterIsMap = after.(map[string]interface{})
-	}
+	beforeMap, beforeIsMap := before.(map[string]interface{})
+	afterMap, afterIsMap := after.(map[string]interface{})
 
 	if !beforeIsMap || !afterIsMap {
 		// Handle non-map types with a simple comparison
@@ -1771,10 +1749,10 @@ func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth in
 
 	// Collect all keys from both before and after
 	allKeys := make(map[string]bool)
-	for k := range before.(map[string]interface{}) {
+	for k := range beforeMap {
 		allKeys[k] = true
 	}
-	for k := range after.(map[string]interface{}) {
+	for k := range afterMap {
 		allKeys[k] = true
 	}
 
@@ -1787,8 +1765,8 @@ func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth in
 
 	// Process each key
 	for _, key := range keys {
-		beforeVal, beforeExists := before.(map[string]interface{})[key]
-		afterVal, afterExists := after.(map[string]interface{})[key]
+		beforeVal, beforeExists := beforeMap[key]
+		afterVal, afterExists := afterMap[key]
 
 		// Handle added attributes
 		if !beforeExists && afterExists {
@@ -1812,11 +1790,12 @@ func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth in
 				// Create block node
 				blockNode := &TreeNode{
 					Text:       fmt.Sprintf("~ %s {", key),
-					Expanded:   false, // Start collapsed
+					Expanded:   true, // Expand by default to show changes
 					Type:       "block",
 					Depth:      depth,
 					Parent:     parent,
 					Toggleable: true,
+					ChangeType: "update",
 				}
 				parent.Children = append(parent.Children, blockNode)
 
@@ -1826,13 +1805,100 @@ func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth in
 				// Add closing brace
 				closingBrace := &TreeNode{
 					Text:       "}",
-					Expanded:   false, // Consistent with block node
+					Expanded:   false,
 					Type:       "closing_brace",
 					Depth:      depth,
 					Parent:     parent,
 					Toggleable: false,
 				}
 				parent.Children = append(parent.Children, closingBrace)
+			} else if beforeSlice, beforeIsSlice := beforeVal.([]interface{}); beforeIsSlice {
+				if afterSlice, afterIsSlice := afterVal.([]interface{}); afterIsSlice {
+					// Handle array changes
+					blockNode := &TreeNode{
+						Text:       fmt.Sprintf("~ %s {", key),
+						Expanded:   true, // Expand by default to show changes
+						Type:       "block",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: true,
+						ChangeType: "update",
+					}
+					parent.Children = append(parent.Children, blockNode)
+
+					// Process each item in the array
+					maxLen := len(beforeSlice)
+					if len(afterSlice) > maxLen {
+						maxLen = len(afterSlice)
+					}
+
+					for i := 0; i < maxLen; i++ {
+						var beforeItem, afterItem interface{}
+						if i < len(beforeSlice) {
+							beforeItem = beforeSlice[i]
+						}
+						if i < len(afterSlice) {
+							afterItem = afterSlice[i]
+						}
+
+						if !reflect.DeepEqual(beforeItem, afterItem) {
+							if beforeItemMap, ok := beforeItem.(map[string]interface{}); ok {
+								if afterItemMap, ok := afterItem.(map[string]interface{}); ok {
+									// Create a node for this array item
+									itemNode := &TreeNode{
+										Text:       fmt.Sprintf("~ [%d] {", i),
+										Expanded:   true,
+										Type:       "block",
+										Depth:      depth + 1,
+										Parent:     blockNode,
+										Toggleable: true,
+										ChangeType: "update",
+									}
+									blockNode.Children = append(blockNode.Children, itemNode)
+
+									// Process the item's attributes
+									processAttributeDiffs(itemNode, beforeItemMap, afterItemMap, depth+2)
+
+									// Add closing brace for the item
+									itemClosingBrace := &TreeNode{
+										Text:       "}",
+										Expanded:   false,
+										Type:       "closing_brace",
+										Depth:      depth + 1,
+										Parent:     blockNode,
+										Toggleable: false,
+									}
+									blockNode.Children = append(blockNode.Children, itemClosingBrace)
+								}
+							} else {
+								// Simple value in array
+								beforeStr := formatAttributeValue(beforeItem)
+								afterStr := formatAttributeValue(afterItem)
+								node := &TreeNode{
+									Text:       fmt.Sprintf("~ [%d] = %s -> %s", i, beforeStr, afterStr),
+									Expanded:   false,
+									Type:       "attribute",
+									Depth:      depth + 1,
+									Parent:     blockNode,
+									Toggleable: false,
+									ChangeType: "update",
+								}
+								blockNode.Children = append(blockNode.Children, node)
+							}
+						}
+					}
+
+					// Add closing brace for the array block
+					closingBrace := &TreeNode{
+						Text:       "}",
+						Expanded:   false,
+						Type:       "closing_brace",
+						Depth:      depth,
+						Parent:     parent,
+						Toggleable: false,
+					}
+					parent.Children = append(parent.Children, closingBrace)
+				}
 			} else {
 				// Handle simple value changes
 				beforeStr := formatAttributeValue(beforeVal)
@@ -1907,8 +1973,8 @@ func processAttributeDiffs(parent *TreeNode, before, after interface{}, depth in
 	// Add a hint about hidden unchanged attributes if there are many
 	var unusedCount int = 0
 	for _, key := range keys {
-		beforeVal, beforeExists := before.(map[string]interface{})[key]
-		afterVal, afterExists := after.(map[string]interface{})[key]
+		beforeVal, beforeExists := beforeMap[key]
+		afterVal, afterExists := afterMap[key]
 
 		if beforeExists && afterExists && reflect.DeepEqual(beforeVal, afterVal) {
 			unusedCount++
@@ -2071,22 +2137,4 @@ func addResourceAttributes(parent *TreeNode, attributes interface{}, prefix stri
 func isRootResource(node *TreeNode) bool {
 	// With the new structure, resource nodes are directly at the root level with depth 0
 	return node.Type == "resource"
-}
-
-// Helper to get grammatically correct action text
-func getGrammaticalAction(action string) string {
-	switch action {
-	case "create":
-		return "created"
-	case "update":
-		return "updated"
-	case "replace":
-		return "replaced"
-	case "destroy":
-		return "destroyed"
-	case "move":
-		return "moved"
-	default:
-		return action + "d" // Add 'd' as a general case
-	}
 }

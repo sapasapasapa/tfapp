@@ -32,7 +32,7 @@ func DisplayPlanSummary(ctx context.Context, planFilePath string) ([]models.Reso
 
 	// Process resource drift if present
 	if len(plan.ResourceDrift) > 0 {
-		fmt.Printf("\n%s%sResources that have changed outside of Terraform (Drift):%s\n",
+		fmt.Printf("\n%s%sResources that have changed outside of Terraform:%s\n",
 			ui.TextBold,
 			ui.ColorHighlight,
 			ui.ColorReset)
@@ -46,7 +46,7 @@ func DisplayPlanSummary(ctx context.Context, planFilePath string) ([]models.Reso
 			action := "drift:" + mapActions(drift.Change.Actions)
 
 			// Generate a human-friendly line for drift
-			line := fmt.Sprintf("# %s has drifted from the TF state", resourceName)
+			line := fmt.Sprintf("# %s has drifted", resourceName)
 
 			resources = append(resources, models.Resource{
 				Name:   resourceName,
@@ -56,7 +56,7 @@ func DisplayPlanSummary(ctx context.Context, planFilePath string) ([]models.Reso
 
 			// Apply the special drift styling only to the "has drifted" part
 			resourcePrefix := fmt.Sprintf("# %s ", resourceName)
-			driftText := "has drifted from the TF state"
+			driftText := "has drifted"
 			colorizedDriftText := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#FF9900")). // Orange color for drift phrase only
 				Render(driftText)
