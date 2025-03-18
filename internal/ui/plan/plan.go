@@ -387,6 +387,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchString = ""
 			}
 		}
+
+	case tea.MouseMsg:
+		// Handle mouse wheel events for scrolling
+		if msg.Action == tea.MouseActionPress {
+			visibleNodes := getVisibleNodes(m.nodes)
+			switch msg.Button {
+			case tea.MouseButtonWheelUp:
+				// Scroll up (same as 'k' key)
+				if m.cursor > 0 {
+					m.cursor--
+					ensureCursorVisible(&m)
+				}
+			case tea.MouseButtonWheelDown:
+				// Scroll down (same as 'j' key)
+				if m.cursor < len(visibleNodes)-1 {
+					m.cursor++
+					ensureCursorVisible(&m)
+				}
+			}
+		}
 	}
 
 	return m, nil
