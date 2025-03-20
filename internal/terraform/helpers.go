@@ -34,7 +34,7 @@ func DisplayPlanSummary(ctx context.Context, planFilePath string) ([]models.Reso
 	if len(plan.ResourceDrift) > 0 {
 		fmt.Printf("\n%s%sResources that have changed outside of Terraform:%s\n",
 			ui.TextBold,
-			ui.ColorHighlight,
+			ui.ColorCyan,
 			ui.ColorReset)
 
 		for _, drift := range plan.ResourceDrift {
@@ -68,7 +68,7 @@ func DisplayPlanSummary(ctx context.Context, planFilePath string) ([]models.Reso
 
 	fmt.Printf("\n%s%sSummary of proposed changes:%s\n",
 		ui.TextBold,
-		ui.ColorHighlight,
+		ui.ColorCyan,
 		ui.ColorReset)
 
 	// Count actions for summary

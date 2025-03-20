@@ -38,7 +38,8 @@ type Model struct {
 	cursor           int         // Current cursor position
 	windowTop        int         // The top line of the window being displayed
 	windowHeight     int         // Height of visible window
-	terminalWidth    int         // Width of the terminal window for text wrapping
+	horizontalOffset int         // Horizontal scroll position
+	width            int         // Width of the terminal window for text wrapping
 	quitting         bool        // Whether the user is quitting
 	ready            bool        // Whether we've received the window size yet
 	showHelp         bool        // Whether to show the help tooltip
@@ -76,7 +77,8 @@ func New(planOutput string) Model {
 		cursor:           0,
 		windowTop:        0,
 		windowHeight:     25, // Show approximately 25 lines at a time for better visibility
-		terminalWidth:    80, // Default terminal width
+		horizontalOffset: 0,  // Start at the leftmost position
+		width:            80, // Default terminal width
 		quitting:         false,
 		ready:            false,
 		showHelp:         false,
@@ -109,7 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Store terminal width for text wrapping
-		m.terminalWidth = msg.Width
+		m.width = msg.Width
 
 		// Mark as ready now that we've received window dimensions
 		m.ready = true
@@ -159,7 +161,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ensureCursorVisible(&m)
 				}
 
-			case "right", "l", " ":
+			case "right", "l":
+				// Horizontal scrolling to the right
+				m.horizontalOffset += 10
+				if m.horizontalOffset > 500 {
+					m.horizontalOffset = 500 // Set a reasonable maximum
+				}
+
+			case "left", "h":
+				// Horizontal scrolling to the left
+				m.horizontalOffset -= 10
+				if m.horizontalOffset < 0 {
+					m.horizontalOffset = 0
+				}
+
+			case " ":
 				// Toggle expansion of the current node
 				visibleNodes := getVisibleNodes(m.nodes)
 				if m.cursor >= 0 && m.cursor < len(visibleNodes) {
@@ -184,6 +200,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
+			// Reset horizontal position when moving to parent or collapsing
+			case "backspace":
+				// Reset horizontal position
+				m.horizontalOffset = 0
+
+				// And do the same for left key behavior - collapse current node or move to parent
+				visibleNodes := getVisibleNodes(m.nodes)
+				if m.cursor >= 0 && m.cursor < len(visibleNodes) {
+					currentNode := visibleNodes[m.cursor]
+					if currentNode.Expanded && len(currentNode.Children) > 0 {
+						// Collapse this node
+						currentNode.Expanded = false
+						// Refresh the list of visible nodes
+						m.allNodes = flattenNodes(m.nodes)
+					} else if currentNode.Parent != nil {
+						// Find parent in visible nodes
+						for i, node := range visibleNodes {
+							if node == currentNode.Parent {
+								m.cursor = i
+								break
+							}
+						}
+					}
+				}
+
 			case "enter":
 				// Toggle expansion of the current node
 				visibleNodes := getVisibleNodes(m.nodes)
@@ -204,27 +245,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// Ensure cursor is in view
 					ensureCursorVisible(&m)
-				}
-
-			case "left", "h":
-				// Collapse current node or move to parent
-				visibleNodes := getVisibleNodes(m.nodes)
-				if m.cursor >= 0 && m.cursor < len(visibleNodes) {
-					currentNode := visibleNodes[m.cursor]
-					if currentNode.Expanded && len(currentNode.Children) > 0 {
-						// Collapse this node
-						currentNode.Expanded = false
-						// Refresh the list of visible nodes
-						m.allNodes = flattenNodes(m.nodes)
-					} else if currentNode.Parent != nil {
-						// Find parent in visible nodes
-						for i, node := range visibleNodes {
-							if node == currentNode.Parent {
-								m.cursor = i
-								break
-							}
-						}
-					}
 				}
 
 			case "a":
@@ -329,6 +349,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "home", "g":
 				// Jump to the top of the plan
 				m.cursor = 0
+				m.horizontalOffset = 0 // Reset horizontal position
 				ensureCursorVisible(&m)
 
 			case "end", "G":
@@ -337,6 +358,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(visibleNodes) > 0 {
 					// Set cursor directly to the last visible node
 					m.cursor = len(visibleNodes) - 1
+					m.horizontalOffset = 0 // Reset horizontal position
 					// Ensure cursor is visible
 					ensureCursorVisible(&m)
 				}
@@ -405,6 +427,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor++
 					ensureCursorVisible(&m)
 				}
+			case tea.MouseButtonWheelRight:
+				// Horizontal scroll left (same as 'h' key)
+				m.horizontalOffset -= 20
+				if m.horizontalOffset < 0 {
+					m.horizontalOffset = 0
+				}
+			case tea.MouseButtonWheelLeft:
+				// Horizontal scroll right (same as 'l' key)
+				m.horizontalOffset += 20
+				if m.horizontalOffset > 500 {
+					m.horizontalOffset = 500 // Set a reasonable maximum
+				}
 			}
 		}
 	}
@@ -452,23 +486,23 @@ func (m Model) View() string {
 		contentEnd = totalNodes
 	}
 
-	// Calculate effective width for text wrapping (accounting for cursor and some buffer)
-	effectiveWidth := m.terminalWidth - 2 // Account for cursor space
-	if effectiveWidth < 20 {
-		effectiveWidth = 20 // Minimum reasonable width
-	}
-
 	// Render visible nodes
-	for i := start; i < contentEnd; i++ {
+	linesRendered := 0
+	for i := start; i < contentEnd && linesRendered < contentHeight; i++ {
 		node := visibleNodes[i]
 
 		// Indent based on depth
 		indent := strings.Repeat("  ", node.Depth)
 
-		// Show cursor if this is the selected node
+		// Show cursor if this is the selected node - make it more prominent
 		cursor := "  "
 		if i == m.cursor {
-			cursor = ui.GetCursorChar() + " "
+			// Use a more prominent cursor character and styling
+			cursorChar := ui.GetCursorChar()
+			cursor = lipgloss.NewStyle().
+				Foreground(lipgloss.Color(ui.GetHexColorByName("highlight"))).
+				Bold(true).
+				Render(cursorChar) + " "
 		}
 
 		// Show expansion indicator if this node has children
@@ -614,6 +648,11 @@ func (m Model) View() string {
 						} else {
 							colorized = ui.ColorInfo + line + ui.ColorForegroundReset
 						}
+					} else if strings.Contains(line, "unchanged") && strings.Contains(line, "hidden") {
+						// Use cyan color specifically for "unchanged ... hidden" comments
+						colorized = lipgloss.NewStyle().
+							Foreground(lipgloss.Color("#00FFFF")). // Bright cyan color
+							Render(line)
 					} else {
 						colorized = ui.ColorInfo + line + ui.ColorForegroundReset
 					}
@@ -626,55 +665,125 @@ func (m Model) View() string {
 			}
 		}
 
-		// Ensure nested resource symbols are colored properly
-		if strings.Contains(line, " + ") && !strings.Contains(colorized, ui.ColorSuccess+"+"+ui.ColorForegroundReset) {
-			colorized = strings.Replace(colorized, " + ", " "+ui.ColorSuccess+"+"+ui.ColorForegroundReset+" ", -1)
-		}
-		if strings.Contains(line, "+ ") && !strings.Contains(colorized, ui.ColorSuccess+"+"+ui.ColorForegroundReset) {
-			colorized = strings.Replace(colorized, "+ ", ui.ColorSuccess+"+"+ui.ColorForegroundReset+" ", -1)
+		// Don't highlight the cursor line yet - we'll do that after text processing
+
+		// Apply horizontal scrolling by truncating the left portion of colorized text
+		// We need to be careful with ANSI color codes, which should not be counted in string length
+		visibleText := colorized
+
+		// Figure out available width for text after cursor and indentation
+		cursorWidth := len(cursor) // Width of cursor area
+
+		// Extract all ANSI codes for parsing text length and preserving them
+		ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+		ansiMatches := ansiRegex.FindAllStringIndex(colorized, -1)
+
+		// Create a map of ANSI code positions
+		ansiCodes := make(map[int]string)
+		ansiLengths := make(map[int]int)
+
+		for _, match := range ansiMatches {
+			ansiCode := colorized[match[0]:match[1]]
+			ansiCodes[match[0]] = ansiCode
+			ansiLengths[match[0]] = match[1] - match[0]
 		}
 
-		// Handle - symbols
-		if strings.Contains(line, " - ") && !strings.Contains(colorized, ui.ColorError+"-"+ui.ColorForegroundReset) {
-			colorized = strings.Replace(colorized, " - ", " "+ui.ColorError+"-"+ui.ColorForegroundReset+" ", -1)
-		}
-		if strings.Contains(line, "- ") && !strings.Contains(colorized, ui.ColorError+"-"+ui.ColorForegroundReset) {
-			colorized = strings.Replace(colorized, "- ", ui.ColorError+"-"+ui.ColorForegroundReset+" ", -1)
-		}
-
-		// Handle ~ symbols
-		if strings.Contains(line, " ~ ") && !strings.Contains(colorized, ui.ColorWarning+"~"+ui.ColorForegroundReset) {
-			colorized = strings.Replace(colorized, " ~ ", " "+ui.ColorWarning+"~"+ui.ColorForegroundReset+" ", -1)
-		}
-		if strings.Contains(line, "~ ") && !strings.Contains(colorized, ui.ColorWarning+"~"+ui.ColorForegroundReset) {
-			colorized = strings.Replace(colorized, "~ ", ui.ColorWarning+"~"+ui.ColorForegroundReset+" ", -1)
-		}
-
-		// Special handling for moved resources
-		if node.PreviousAddress != "" && node.PreviousAddress != "" {
-			// Highlight the moved portion distinctively
-			movedText := fmt.Sprintf("(moved from %s)", node.PreviousAddress)
-			if strings.Contains(colorized, movedText) {
-				highlightedMove := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#00CCFF")). // Light blue for moved
-					Bold(true).
-					Render(movedText)
-				colorized = strings.Replace(colorized, movedText, highlightedMove, 1)
+		// Calculate the visual length (text without ANSI codes)
+		visualLength := 0
+		for pos := 0; pos < len(colorized); pos++ {
+			if _, found := ansiCodes[pos]; found {
+				pos += ansiLengths[pos] - 1
+				continue
 			}
+			visualLength++
 		}
 
-		// Highlight the current line
+		// Only apply horizontal scrolling if this line exceeds the terminal width and scrolling is active
+		if m.horizontalOffset > 0 && visualLength > m.width {
+			// Find the starting position
+			visualPos := 0
+			actualStart := 0
+
+			for pos := 0; pos < len(colorized) && visualPos < m.horizontalOffset; pos++ {
+				if _, found := ansiCodes[pos]; found {
+					pos += ansiLengths[pos] - 1
+					continue
+				}
+				visualPos++
+				actualStart = pos + 1
+			}
+
+			// Extract all ANSI codes that were active before the starting position
+			var activeStyleCodes []string
+			for pos := 0; pos < actualStart; pos++ {
+				if code, found := ansiCodes[pos]; found {
+					if !strings.Contains(code, "[0m") {
+						// Add to active style codes
+						activeStyleCodes = append(activeStyleCodes, code)
+					} else {
+						// Reset clears all active codes
+						activeStyleCodes = nil
+					}
+				}
+			}
+
+			// Build the visible part of the text
+			var sb strings.Builder
+
+			// Add leading ellipsis if we're not at the start
+			if m.horizontalOffset > 0 {
+				sb.WriteString("... ")
+			}
+
+			// Add active styles at the beginning
+			for _, code := range activeStyleCodes {
+				sb.WriteString(code)
+			}
+
+			// Extract all text from the starting position without any length limit
+			for pos := actualStart; pos < len(colorized); pos++ {
+				if code, found := ansiCodes[pos]; found {
+					sb.WriteString(code)
+					pos += len(code) - 1
+					continue
+				}
+
+				sb.WriteByte(colorized[pos])
+			}
+
+			visibleText = sb.String()
+		} else {
+			// No horizontal scrolling - show the entire text without any trimming
+			visibleText = colorized
+		}
+
+		// Now apply highlighting to the processed visible text if this is the cursor line
 		if i == m.cursor {
-			colorized = lipgloss.NewStyle().
-				Background(lipgloss.Color("#333333")).
-				Render(colorized)
+			// First determine the visual width of the text (without ANSI codes)
+			cleanText := ansiRegex.ReplaceAllString(visibleText, "")
+			visualWidth := len(cleanText)
+
+			// Calculate remaining width to fill the terminal width
+			remainingWidth := m.width - cursorWidth - visualWidth - 2
+
+			// Only add padding if we need to fill extra space
+			if remainingWidth > 0 {
+				// Add spaces to pad to the terminal width
+				padding := strings.Repeat(" ", remainingWidth)
+				visibleText += padding
+			}
+
+			// Apply highlighting with lipgloss style
+			visibleText = lipgloss.NewStyle().
+				Background(lipgloss.Color("#555555")).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Bold(true).
+				Render(visibleText)
 		}
 
-		// Apply text wrapping to handle long lines
-		wrappedText := wrapText(colorized, effectiveWidth, indent)
-
-		// Write the line to output
-		sb.WriteString(cursor + wrappedText + "\n")
+		// Write the line to output with cursor
+		sb.WriteString(cursor + visibleText + "\n")
+		linesRendered++
 	}
 
 	// Calculate the percentage
@@ -759,6 +868,7 @@ func Show(planOutput string) error {
 		tea.WithMouseCellMotion(), // Capture mouse events
 	)
 	_, err := p.Run()
+
 	return err
 }
 
@@ -903,6 +1013,7 @@ func getVisibleNodes(nodes []*TreeNode) []*TreeNode {
 	return result
 }
 
+// ensureCursorVisible ensures the cursor is visible within the window.
 func ensureCursorVisible(m *Model) {
 	visibleNodes := getVisibleNodes(m.nodes)
 
@@ -910,6 +1021,7 @@ func ensureCursorVisible(m *Model) {
 	if m.cursor >= len(visibleNodes) {
 		m.cursor = len(visibleNodes) - 1
 	}
+
 	// Ensure cursor is never negative
 	if m.cursor < 0 {
 		m.cursor = 0
@@ -921,27 +1033,47 @@ func ensureCursorVisible(m *Model) {
 		effectiveWindowHeight = 1
 	}
 
-	// Check if cursor is outside visible window
-	if m.cursor < m.windowTop {
-		// Cursor is above the window, adjust windowTop to show cursor at top
-		m.windowTop = m.cursor
-	} else if m.cursor >= m.windowTop+effectiveWindowHeight {
+	// Always check if cursor is outside visible window, regardless of order
+	cursorBelowWindow := m.cursor >= m.windowTop+effectiveWindowHeight
+	cursorAboveWindow := m.cursor < m.windowTop
+
+	// Handle case where cursor is below window
+	if cursorBelowWindow {
 		// Cursor is below the window, adjust windowTop to show cursor at bottom of window
 		m.windowTop = m.cursor - effectiveWindowHeight + 1
 	}
 
+	// Handle case where cursor is above window
+	if cursorAboveWindow {
+		// Cursor is above the window, adjust windowTop to show cursor at top
+		m.windowTop = m.cursor
+	}
+
+	// Add a buffer space at the top when possible to provide context
+	// (don't do this when cursor is at the very top)
+	if m.cursor > 2 && m.windowTop == m.cursor {
+		// Add some context lines above the cursor (show 2 lines above when possible)
+		m.windowTop = m.cursor - 2
+	}
+
+	// Final safety checks
 	// Ensure windowTop is not negative
 	if m.windowTop < 0 {
 		m.windowTop = 0
 	}
 
-	// Ensure windowTop isn't too large (which would leave empty space at bottom)
-	maxTop := len(visibleNodes) - effectiveWindowHeight
-	if maxTop < 0 {
-		maxTop = 0
-	}
-	if m.windowTop > maxTop {
-		m.windowTop = maxTop
+	// Double-check cursor is visible after all adjustments
+	if m.cursor < m.windowTop || m.cursor >= m.windowTop+effectiveWindowHeight {
+		if m.cursor < effectiveWindowHeight {
+			// If cursor is near the top, show from the beginning
+			m.windowTop = 0
+		} else {
+			// Otherwise center cursor in the window
+			m.windowTop = m.cursor - (effectiveWindowHeight / 2)
+			if m.windowTop < 0 {
+				m.windowTop = 0
+			}
+		}
 	}
 }
 
@@ -995,9 +1127,11 @@ func renderHelpTooltip() string {
 	}{
 		{"↑/k", "Move cursor up"},
 		{"↓/j", "Move cursor down"},
-		{"→/l/Space", "Expand current node"},
+		{"→/l", "Scroll right (view more text)"},
+		{"←/h", "Scroll left (view beginning of text)"},
+		{"Space", "Expand current node"},
+		{"Backspace", "Reset horizontal position and collapse node"},
 		{"Enter", "Expand current node and all its children"},
-		{"←/h", "Collapse current node or jump to parent"},
 		{"a", "Expand all nodes"},
 		{"A", "Collapse all nodes except root level"},
 		{"n", "Jump to next root resource (in normal mode) or next search match (in search mode)"},
@@ -1057,7 +1191,7 @@ func renderHelpTooltip() string {
 	// Add special colors
 	helpContent.WriteString(fmt.Sprintf("%s  %s\n",
 		driftColor,
-		descStyle.Render("\"has drifted\" text for resources changed outside of Terraform")))
+		descStyle.Render("Resources that have drifted outside of Terraform")))
 
 	helpContent.WriteString(fmt.Sprintf("%s  %s\n",
 		moveColor,
@@ -1297,16 +1431,6 @@ func parseTerraformPlanJSON(planJSON string) []*TreeNode {
 
 	// First, check for resource drift and add them directly as root nodes
 	if resourceDrift, ok := plan["resource_drift"].([]interface{}); ok && len(resourceDrift) > 0 {
-		// Add a section header (not a real node in the tree hierarchy)
-		rootNodes = append(rootNodes, &TreeNode{
-			Text:       "Resources Changed Outside of Terraform (Drift)",
-			Expanded:   true,
-			Type:       "section_header",
-			Depth:      0,
-			Toggleable: false,
-			ChangeType: "drift",
-		})
-
 		// Create a map to store drifted resources by their path
 		driftedResources := make(map[string]*TreeNode)
 
