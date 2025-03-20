@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -79,6 +78,7 @@ func (a *App) handleInit(ctx context.Context, performInit, performUpgrade bool) 
 
 // handleMenuSelection displays the menu and processes the user's selection.
 func (a *App) handleMenuSelection(ctx context.Context, planFile string, resources []models.Resource, flags *Flags) error {
+
 	selection, err := menu.Show()
 	if err != nil {
 		return apperrors.NewUserInteractionError("menu selection", "Failed to show menu", err)
@@ -94,8 +94,12 @@ func (a *App) handleMenuSelection(ctx context.Context, planFile string, resource
 		if err != nil {
 			return err
 		}
-		printSummary(ctx, planFile)
-		return a.handleMenuSelection(ctx, planFile, resources, flags)
+		// Call DisplayPlanSummary directly and capture updated resources
+		updatedResources, err := terraform.DisplayPlanSummary(ctx, planFile)
+		if err != nil {
+			return err
+		}
+		return a.handleMenuSelection(ctx, planFile, updatedResources, flags)
 	case "Do a target apply":
 		menu.ClearMenuOutput()
 		return a.handleTargetApply(ctx, resources, flags)
@@ -114,9 +118,36 @@ func (a *App) handleMenuSelection(ctx context.Context, planFile string, resource
 
 // handleTargetApply processes targeted resource application.
 func (a *App) handleTargetApply(ctx context.Context, resources []models.Resource, flags *Flags) error {
-	// Convert resources to checkbox options
-	checkboxOptions := make([]checkbox.Option, 0, len(resources))
+	// Filter resources to exclude drifted and moved resources
+	targetableResources := make([]models.Resource, 0, len(resources))
 	for _, resource := range resources {
+		// Skip drifted resources (containing "has drifted")
+		if strings.Contains(resource.Line, "has drifted") {
+			continue
+		}
+
+		// Skip moved resources (containing "moved from")
+		if strings.Contains(resource.Line, "moved from") {
+			continue
+		}
+
+		// Only include resources with standard actions: create, update, destroy, replace
+		if resource.Action == "create" || resource.Action == "update" ||
+			resource.Action == "destroy" || resource.Action == "replace" {
+			targetableResources = append(targetableResources, resource)
+		}
+	}
+
+	// If no targetable resources, inform the user
+	if len(targetableResources) == 0 {
+		utils.ClearTerminal()
+		fmt.Printf("%sNo resources available for targeted apply. Drifted and moved resources are excluded from targeting.%s\n", ui.ColorInfo, ui.ColorReset)
+		return nil
+	}
+
+	// Convert resources to checkbox options
+	checkboxOptions := make([]checkbox.Option, 0, len(targetableResources))
+	for _, resource := range targetableResources {
 		checkboxOptions = append(checkboxOptions, checkbox.Option{
 			Name:        resource.Name,
 			Description: resource.Action,
@@ -182,58 +213,4 @@ func createTempPlanFile() (string, error) {
 
 	// Create a temporary file path
 	return filepath.Join(tempDir, "terraform.tfplan"), nil
-}
-
-func printSummary(ctx context.Context, planFilePath string) ([]models.Resource, error) {
-	ctxTyped, ok := ctx.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("context type assertion failed")
-	}
-
-	tfshow := exec.CommandContext(ctxTyped, "terraform", "show", "-no-color", planFilePath)
-	tfshow.Stderr = os.Stderr
-	output, err := tfshow.Output()
-	if err != nil {
-		return nil, fmt.Errorf("error showing plan: %w", err)
-	}
-
-	lines := strings.Split(string(output), "\n")
-	var resources []models.Resource
-
-	fmt.Println("Summary of proposed changes:")
-
-	for _, line := range lines {
-		if strings.Contains(line, "#") && (strings.Contains(line, "will be") || strings.Contains(line, "must be")) {
-			action := getResourceAction(line)
-			// Clean up the name by removing leading # and whitespace
-			name := strings.TrimPrefix(strings.TrimSpace(strings.Split(strings.Split(line, " will be")[0], " must be")[0]), "#")
-
-			resources = append(resources, models.Resource{
-				Name:   name,
-				Action: action,
-				Line:   line,
-			})
-
-			colorizedLine := ui.Colorize(line)
-			fmt.Println(colorizedLine)
-		} else if strings.Contains(line, "Plan:") {
-			fmt.Println(ui.Colorize(line))
-		}
-	}
-
-	return resources, nil
-}
-
-// getResourceAction determines the action type from a terraform plan line
-func getResourceAction(line string) string {
-	if strings.Contains(line, "will be created") {
-		return "create"
-	} else if strings.Contains(line, "will be destroyed") {
-		return "destroy"
-	} else if strings.Contains(line, "will be updated in-place") {
-		return "update"
-	} else if strings.Contains(line, "must be replaced") {
-		return "replace"
-	}
-	return "unknown"
 }

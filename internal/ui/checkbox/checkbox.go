@@ -38,7 +38,7 @@ type model struct {
 func (m model) Init() tea.Cmd {
 	// Initialize styles
 	m.updateStyles()
-	return nil
+	return tea.EnableMouseCellMotion
 }
 
 // Update implements tea.Model.
@@ -71,6 +71,52 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Make sure cursor is visible in the new window size
 			ensureCursorVisible(&m)
+		}
+
+	case tea.MouseMsg:
+		// Handle mouse events
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			// Scroll up
+			if m.windowTop > 0 {
+				m.windowTop--
+			}
+
+		case tea.MouseWheelDown:
+			// Scroll down
+			maxTop := len(m.options) - m.windowHeight
+			if maxTop < 0 {
+				maxTop = 0
+			}
+			if m.windowTop < maxTop {
+				m.windowTop++
+			}
+
+		case tea.MouseLeft:
+			// Only process clicks within the option list area
+			start := m.windowTop
+			end := m.windowTop + m.windowHeight - 1 // Reserve space for status bar
+			if end > len(m.options) {
+				end = len(m.options)
+			}
+
+			// Check if the click is within the visible options range
+			// Adjust for header (2 lines)
+			if msg.Y >= 2 && msg.Y < 2+(end-start) {
+				// Calculate which option was clicked
+				clickedIndex := m.windowTop + (msg.Y - 2)
+
+				// Ensure index is within bounds
+				if clickedIndex >= 0 && clickedIndex < len(m.options) {
+					// If clicking the same option, toggle it
+					if m.cursor == clickedIndex {
+						m.options[m.cursor].Checked = !m.options[m.cursor].Checked
+					} else {
+						// Move cursor to the clicked option
+						m.cursor = clickedIndex
+					}
+				}
+			}
 		}
 
 	case tea.KeyMsg:
@@ -334,7 +380,7 @@ func Show(options []Option) ([]Option, error) {
 	// Initialize styles
 	m.updateStyles()
 
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithMouseCellMotion())
 	finalModel, err := p.Run()
 	if err != nil {
 		return nil, err

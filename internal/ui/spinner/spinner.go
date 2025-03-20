@@ -43,6 +43,11 @@ func init() {
 // quitMsg is sent when the spinner should stop
 type quitMsg struct{}
 
+// updateMsg is sent when the spinner message should be updated
+type updateMsg struct {
+	message string
+}
+
 // model represents the spinner state
 type model struct {
 	spinner  spinner.Model
@@ -99,6 +104,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case quitMsg:
 		m.quitting = true
 		return m, tea.Quit
+	case updateMsg:
+		m.message = msg.message
+		return m, nil
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -132,6 +140,13 @@ func (s *Spinner) Start() {
 		}
 		close(s.model.done)
 	}()
+}
+
+// UpdateMessage updates the spinner's message text while it's running.
+func (s *Spinner) UpdateMessage(message string) {
+	if s.model.program != nil {
+		s.model.program.Send(updateMsg{message: message})
+	}
 }
 
 // Stop ends the spinner animation.

@@ -26,6 +26,7 @@ var (
 	// Additional stored colors
 	ColorHighlight = "\033[38;2;130;57;243m"  // Purple for highlights (#8239F3)
 	ColorFaint     = "\033[38;2;119;119;119m" // Gray for less important text (#777)
+	ColorCyan      = "\033[38;2;0;255;255m"   // Bright cyan (#00FFFF) for unchanged blocks
 
 	// Store the loaded config
 	appConfig *config.Config
@@ -91,6 +92,8 @@ func GetHexColorByName(name string) string {
 			return "#ffaa00" // Yellow/Orange
 		case "error":
 			return "#ff3333" // Red
+		case "cyan":
+			return "#00FFFF" // Bright cyan
 		default:
 			return "" // No color
 		}
@@ -109,6 +112,8 @@ func GetHexColorByName(name string) string {
 		return appConfig.Colors.Highlight
 	case "faint":
 		return appConfig.Colors.Faint
+	case "cyan":
+		return "#00FFFF" // Hardcoded since it's not in config
 	default:
 		return ""
 	}
@@ -175,6 +180,8 @@ func GetColorByName(name string) string {
 			return ColorWarning
 		case "error":
 			return ColorError
+		case "cyan":
+			return ColorCyan
 		default:
 			return ColorForegroundReset
 		}
@@ -193,6 +200,8 @@ func GetColorByName(name string) string {
 		return parseColorToAnsi(appConfig.Colors.Highlight)
 	case "faint":
 		return parseColorToAnsi(appConfig.Colors.Faint)
+	case "cyan":
+		return ColorCyan // Use the constant directly
 	default:
 		return ColorForegroundReset
 	}

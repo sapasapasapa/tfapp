@@ -2,13 +2,16 @@
 package terraform
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
+	"time"
 
 	"tfapp/internal/models"
 	"tfapp/internal/ui/spinner"
@@ -17,11 +20,29 @@ import (
 // CommandExecutor handles executing Terraform commands.
 type CommandExecutor struct {
 	// Add fields if needed in the future for configuration
+	progressCallbacks []ProgressCallback
 }
+
+// ProgressCallback is a function type that gets called with progress updates
+type ProgressCallback func(status string)
 
 // NewCommandExecutor creates a new Terraform command executor.
 func NewCommandExecutor() *CommandExecutor {
-	return &CommandExecutor{}
+	return &CommandExecutor{
+		progressCallbacks: make([]ProgressCallback, 0),
+	}
+}
+
+// RegisterProgressCallback registers a callback function to receive progress updates
+func (e *CommandExecutor) RegisterProgressCallback(callback ProgressCallback) {
+	e.progressCallbacks = append(e.progressCallbacks, callback)
+}
+
+// notifyProgress sends a status update to all registered callbacks
+func (e *CommandExecutor) notifyProgress(status string) {
+	for _, callback := range e.progressCallbacks {
+		callback(status)
+	}
 }
 
 // RunCommand executes a terraform command with the given arguments.
@@ -38,55 +59,147 @@ func (e *CommandExecutor) RunCommand(ctx interface{}, args []string, spinnerMsg 
 
 	var stdout, stderr bytes.Buffer
 	var wg sync.WaitGroup
+	var progressWg sync.WaitGroup
 
+	// Create pipes for real-time output processing
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("error creating stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("error creating stderr pipe: %w", err)
+	}
+
+	// Setup the multiplexing of outputs
+	stdoutReader, stdoutWriter := io.Pipe()
+	stderrReader, stderrWriter := io.Pipe()
+
+	progressWg.Add(1)
+	go func() {
+		defer progressWg.Done()
+		e.processOutputForProgress(stdoutReader, "stdout")
+	}()
+
+	progressWg.Add(1)
+	go func() {
+		defer progressWg.Done()
+		e.processOutputForProgress(stderrReader, "stderr")
+	}()
+
+	// Set up output handling
+	wg.Add(2)
 	if redirectOutput {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	} else {
-		// Set up pipes for capturing output
-		stdoutPipe, err := cmd.StdoutPipe()
-		if err != nil {
-			return fmt.Errorf("error creating stdout pipe: %w", err)
-		}
-		stderrPipe, err := cmd.StderrPipe()
-		if err != nil {
-			return fmt.Errorf("error creating stderr pipe: %w", err)
-		}
-
-		// Copy output to buffers
-		wg.Add(2)
+		// Tee the output to both the console and our progress monitoring
 		go func() {
 			defer wg.Done()
-			io.Copy(&stdout, stdoutPipe)
+			defer stdoutWriter.Close()
+			mw := io.MultiWriter(os.Stdout, stdoutWriter, &stdout)
+			io.Copy(mw, stdoutPipe)
 		}()
 		go func() {
 			defer wg.Done()
-			io.Copy(&stderr, stderrPipe)
+			defer stderrWriter.Close()
+			mw := io.MultiWriter(os.Stderr, stderrWriter, &stderr)
+			io.Copy(mw, stderrPipe)
+		}()
+	} else {
+		// Capture output for our buffers and progress monitoring
+		go func() {
+			defer wg.Done()
+			defer stdoutWriter.Close()
+			mw := io.MultiWriter(stdoutWriter, &stdout)
+			io.Copy(mw, stdoutPipe)
+		}()
+		go func() {
+			defer wg.Done()
+			defer stderrWriter.Close()
+			mw := io.MultiWriter(stderrWriter, &stderr)
+			io.Copy(mw, stderrPipe)
 		}()
 	}
 
+	// Start an enhanced spinner with status updates
 	s := spinner.New(spinnerMsg)
 	s.Start()
 
-	err := cmd.Start()
+	// Start the command
+	err = cmd.Start()
 	if err != nil {
 		s.Stop()
 		return fmt.Errorf("error starting terraform command: %w", err)
 	}
 
-	if !redirectOutput {
-		wg.Wait() // Wait for output copying to complete
-	}
+	// Start a goroutine to periodically update the spinner message with status
+	statusCtx, statusCancel := context.WithCancel(ctxTyped)
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		counter := 0
+		for {
+			select {
+			case <-statusCtx.Done():
+				return
+			case <-ticker.C:
+				counter++
+				s.UpdateMessage(fmt.Sprintf("%s (running for %ds)", spinnerMsg, counter*5))
+			}
+		}
+	}()
 
-	err = cmd.Wait()
+	// Wait for the command to finish
+	cmdErr := cmd.Wait()
+
+	// Stop the status updates
+	statusCancel()
+
+	// Wait for the output processing to finish
+	wg.Wait()
+
+	// Close the readers to signal the progress processors to finish
+	stdoutReader.Close()
+	stderrReader.Close()
+
+	// Wait for progress processors to finish
+	progressWg.Wait()
+
+	// Stop the spinner
 	s.Stop()
 
-	if err != nil && !redirectOutput {
-		// Include both stdout and stderr in the error message
-		return fmt.Errorf("%s\n%s: %w", stdout.String(), stderr.String(), err)
+	if cmdErr != nil {
+		e.notifyProgress(fmt.Sprintf("Command failed: %v", cmdErr))
+		if !redirectOutput {
+			// Include both stdout and stderr in the error message
+			return fmt.Errorf("%s\n%s: %w", stdout.String(), stderr.String(), cmdErr)
+		}
+		return cmdErr
 	}
 
-	return err
+	return nil
+}
+
+// processOutputForProgress monitors the command output for progress indicators
+func (e *CommandExecutor) processOutputForProgress(reader io.Reader, source string) {
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Skip the redundant lines that we don't want to show
+		if strings.Contains(line, "Terraform will perform the following actions") ||
+			strings.Contains(line, "Plan:") {
+			continue
+		}
+
+		// Look for specific Terraform progress indicators we want to show
+		if strings.Contains(line, "Apply complete!") ||
+			strings.Contains(line, "Preparing the remote plan") ||
+			strings.Contains(line, "Executing plan:") ||
+			strings.Contains(line, "Still creating...") ||
+			strings.Contains(line, "Still destroying...") ||
+			strings.Contains(line, "Still modifying...") {
+			e.notifyProgress(line)
+		}
+	}
 }
 
 // Ensure CommandExecutor implements the models.Executor interface
