@@ -59,13 +59,13 @@ type ResourceChange struct {
 }
 
 type Change struct {
-	Actions         []string    `json:"actions"`
-	Before          interface{} `json:"before"`
-	After           interface{} `json:"after"`
-	AfterUnknown    interface{} `json:"after_unknown,omitempty"`
-	BeforeSensitive interface{} `json:"before_sensitive,omitempty"`
-	AfterSensitive  interface{} `json:"after_sensitive,omitempty"`
-	ReplacePaths    [][]string  `json:"replace_paths,omitempty"`
+	Actions         []string        `json:"actions"`
+	Before          interface{}     `json:"before"`
+	After           interface{}     `json:"after"`
+	AfterUnknown    interface{}     `json:"after_unknown,omitempty"`
+	BeforeSensitive interface{}     `json:"before_sensitive,omitempty"`
+	AfterSensitive  interface{}     `json:"after_sensitive,omitempty"`
+	ReplacePaths    [][]interface{} `json:"replace_paths,omitempty"`
 }
 
 // PlanManager handles Terraform plan operations.
