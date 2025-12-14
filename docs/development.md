@@ -58,6 +58,27 @@ go build -o build/tfapp ./cmd/tfapp
 go build -gcflags="all=-N -l" -o build/tfapp ./cmd/tfapp
 ```
 
+## Testing
+
+TFApp uses Go's built-in testing framework. Tests are located alongside the code they test, following the `*_test.go` naming convention.
+
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run tests with verbose output
+go test ./... -v
+
+# Run tests in a specific package
+go test ./internal/terraform/... -v
+
+# Run a specific test
+go test ./internal/terraform/... -v -run TestReplacePaths_MixedTypes
+```
+
+
 ## Core Components
 
 ### Command Executor

@@ -69,12 +69,17 @@ Building from source gives you the latest code and the ability to customize the 
    go build -o build/tfapp ./cmd/tfapp
    ```
 
-3. (Optional) Install the binary to a location in your PATH:
+3. (Optional) Run tests:
+   ```bash
+   go test ./...
+   ````
+
+4. (Optional) Install the binary to a location in your PATH:
    ```bash
    sudo cp build/tfapp /usr/local/bin/
    ```
 
-4. Verify the installation:
+5. Verify the installation:
    ```bash
    tfapp --version
    ```
